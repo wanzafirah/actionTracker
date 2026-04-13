@@ -36,6 +36,18 @@ OLLAMA_MODEL = "llama3.2"
 WHISPER_MODEL = "tiny"
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetiq_data.xlsx")
 
+
+def get_ollama_url() -> str:
+    secret_value = ""
+    try:
+        secret_value = st.secrets.get("OLLAMA_URL", "")
+    except Exception:
+        secret_value = ""
+    return os.getenv("OLLAMA_URL", secret_value or "http://127.0.0.1:11434/api/generate")
+
+
+OLLAMA_URL = get_ollama_url()
+
 STATUSES = ["Pending", "In Progress", "Done", "Overdue", "Cancelled"]
 MTG_TYPES = ["Virtual", "Physical", "Not Provided"]
 CATEGORIES = ["Event", "External Meeting", "Internal Meeting", "Workshop"]
@@ -103,7 +115,12 @@ def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
         "prompt": user_msg,
         "system": system,
         "stream": False,
-        "options": {"num_predict": max_tokens, "temperature": 0.1, "top_p": 0.9},
+        "options": {
+            "num_predict": max_tokens,
+            "num_ctx": 2048,
+            "temperature": 0.1,
+            "top_p": 0.9,
+        },
     }
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=300)
@@ -114,7 +131,10 @@ def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
         detail = exc.response.text[:500] if exc.response is not None else str(exc)
         raise RuntimeError(f"Ollama request failed with status {status_code}. {detail}") from exc
     except requests.RequestException as exc:
-        raise RuntimeError(f"Could not connect to Ollama at {OLLAMA_URL}. Please check that Ollama is running.") from exc
+        raise RuntimeError(
+            f"Could not connect to Ollama at {OLLAMA_URL}. "
+            "If you are deploying on Streamlit Cloud, set OLLAMA_URL to a reachable server."
+        ) from exc
 
 
 # ============================================================
@@ -1165,7 +1185,7 @@ def extract_json(raw: str) -> dict:
 
 
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
-    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=1200)
+    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=800)
     objective_only = is_objective_only_transcript(cleaned_transcript)
     metadata_lines = []
     for label, value in (metadata or {}).items():
@@ -1185,7 +1205,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         f"Activity metadata:\n{metadata_block or 'None provided'}\n\n"
         f"Meeting content:\n{cleaned_transcript}"
     )
-    raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=450)
+    raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
     result = extract_json(raw)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
@@ -2275,17 +2295,3 @@ with tabs[5]:
         )
         style_plotly(fig_spend)
         st.plotly_chart(fig_spend, use_container_width=True)
-
-        followups = [meeting for meeting in meetings if meeting.get("followUp")]
-        if followups:
-            st.markdown("### Requires Follow-up")
-            for meeting in followups:
-                st.markdown(
-                    f"""
-                    <div class="info-card">
-                        <div class="mini-title">{meeting['title']}</div>
-                        <div class="mini-copy">Follow-up: Yes</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
