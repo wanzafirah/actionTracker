@@ -1,0 +1,9 @@
+streamlit
+pandas
+plotly
+requests
+openpyxl
+pypdf
+python-docx
+openai-whisper
+torch
