@@ -178,6 +178,19 @@ def set_tracker_shortcut(mode: str):
     st.session_state.tracker_focus = mode
 
 
+def sync_page_from_query():
+    try:
+        page_value = st.query_params.get("page")
+        focus_value = st.query_params.get("focus")
+    except Exception:
+        return
+
+    if page_value in {"Dashboard", "Capture", "Tracker", "Finance"}:
+        st.session_state.current_page = page_value
+    if focus_value in {"all", "open", "done"}:
+        st.session_state.tracker_focus = focus_value
+
+
 def clear_capture_inputs():
     st.session_state.pending_result = None
     st.session_state.capture_transcript = ""
@@ -949,6 +962,22 @@ def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
     )
 
 
+def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str) -> None:
+    href = f"?page={page}&focus={focus}"
+    st.markdown(
+        f"""
+        <a class="card-link" href="{href}">
+            <div class="kpi-card clickable-card">
+                <div class="kpi-label">{title}</div>
+                <div class="kpi-value" style="color:{accent}">{value}</div>
+                <div class="kpi-subtitle">{subtitle}</div>
+            </div>
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_completion_ring(percent: int) -> None:
     safe_percent = max(0, min(int(percent), 100))
     st.markdown(
@@ -962,6 +991,27 @@ def render_completion_ring(percent: int) -> None:
             </div>
             <div class="kpi-subtitle">Action completeness</div>
         </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_completion_link_ring(percent: int, page: str, focus: str) -> None:
+    safe_percent = max(0, min(int(percent), 100))
+    href = f"?page={page}&focus={focus}"
+    st.markdown(
+        f"""
+        <a class="card-link" href="{href}">
+            <div class="completion-card clickable-card">
+                <div class="kpi-label">Completion</div>
+                <div class="completion-wrap">
+                    <div class="completion-ring" style="--pct:{safe_percent};">
+                        <div class="completion-inner">{safe_percent}%</div>
+                    </div>
+                </div>
+                <div class="kpi-subtitle">Action completeness</div>
+            </div>
+        </a>
         """,
         unsafe_allow_html=True,
     )
@@ -1518,7 +1568,7 @@ st.markdown(
         font-weight: 700;
     }
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #3647b7 0%, #24338d 100%);
+        background: linear-gradient(180deg, #4657c8 0%, #3246af 45%, #24338d 100%);
         border-right: 1px solid rgba(255,255,255,0.10);
     }
     section[data-testid="stSidebar"] .block-container {
@@ -1546,6 +1596,19 @@ st.markdown(
         background: rgba(255,255,255,0.12) !important;
         color: #ffffff !important;
         backdrop-filter: blur(4px);
+    }
+    .card-link {
+        text-decoration: none !important;
+        display: block;
+    }
+    .clickable-card {
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    .clickable-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.09);
+        border-color: #b8c8dd;
     }
     h2, h3, label, .stMarkdown, .stCaption, .stRadio label, .stSelectbox label {
         color: var(--text) !important;
@@ -1983,17 +2046,8 @@ def init_state():
 
 
 init_state()
+sync_page_from_query()
 seed_default_departments()
-
-st.markdown(
-    """
-    <div class="hero-shell">
-        <h1>AI-Powered Meeting Insight Generator &amp; Action Tracker</h1>
-        <p>for Talentcorp by z</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
 meetings = st.session_state.meetings
 meeting_df = build_meeting_dataframe(meetings)
@@ -2364,32 +2418,11 @@ if st.session_state.current_page == "Dashboard":
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706")
-                st.button(
-                    "Open in Tracker",
-                    key="dashboard_open_tasks_btn",
-                    use_container_width=True,
-                    on_click=set_tracker_shortcut,
-                    args=("open",),
-                )
+                render_kpi_link_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706", "Tracker", "open")
             with c3:
-                render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
-                st.button(
-                    "View Completed",
-                    key="dashboard_done_btn",
-                    use_container_width=True,
-                    on_click=set_tracker_shortcut,
-                    args=("done",),
-                )
+                render_kpi_link_card("Done", str(done_count), "Completed actions", "#16a34a", "Tracker", "done")
             with c4:
-                render_completion_ring(completion_pct)
-                st.button(
-                    "See Completion",
-                    key="dashboard_completion_btn",
-                    use_container_width=True,
-                    on_click=set_tracker_shortcut,
-                    args=("done",),
-                )
+                render_completion_link_ring(completion_pct, "Tracker", "done")
 
         if not meeting_df.empty:
             year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
