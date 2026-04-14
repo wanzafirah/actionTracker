@@ -1493,32 +1493,43 @@ def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
     return [meeting for _, meeting in selected]
 
 
+def get_pending_deadline_days(meetings: list, year: int, month: int) -> set:
+    pending_days = set()
+    for meeting in meetings:
+        for action in meeting.get("actions", []):
+            if normalize_status(action) != "Pending":
+                continue
+            deadline = normalize_value(action.get("deadline"), "")
+            if not deadline or deadline == "None":
+                continue
+            try:
+                parsed = datetime.strptime(str(deadline), "%Y-%m-%d").date()
+            except Exception:
+                continue
+            if parsed.year == year and parsed.month == month:
+                pending_days.add(parsed.day)
+    return pending_days
+
+
 def build_calendar_html(meetings: list, year: int, month: int) -> str:
     cal = calendar.Calendar(firstweekday=0)
-    meeting_days = set()
-    for meeting in meetings:
-        try:
-            parsed = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
-        except Exception:
-            continue
-        if parsed.year == year and parsed.month == month:
-            meeting_days.add(parsed.day)
-
     weeks = cal.monthdayscalendar(year, month)
     day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     header = "".join(f"<div class='calendar-day-label'>{label}</div>" for label in day_labels)
     cells = []
     today = date.today()
+    pending_days = get_pending_deadline_days(meetings, year, month)
     for week in weeks:
         for day_num in week:
             classes = ["calendar-day"]
             label = "" if day_num == 0 else str(day_num)
-            if day_num == today.day and month == today.month and year == today.year:
-                classes.append("today")
-            if day_num in meeting_days:
-                classes.append("has-event")
             if day_num == 0:
                 classes.append("empty")
+            else:
+                if day_num in pending_days:
+                    classes.append("pending-deadline")
+                if day_num == today.day and month == today.month and year == today.year:
+                    classes.append("today")
             cells.append(f"<div class='{' '.join(classes)}'>{label}</div>")
 
     return f"""
@@ -1986,27 +1997,33 @@ st.markdown(
         min-height: 108px;
     }
     .nav-card-marker + div[data-testid="stButton"] > button {
-        min-height: 168px;
-        border-radius: 22px;
-        border: 1px solid #d7e3f3;
-        background: #ffffff;
-        color: #0f172a;
-        box-shadow: 0 16px 28px rgba(30, 58, 95, 0.08);
-        white-space: pre-line;
-        text-align: left;
-        justify-content: flex-start;
-        align-items: flex-start;
-        padding: 1.1rem 1.1rem;
-        font-weight: 700;
-        line-height: 1.55;
+        min-height: 168px !important;
+        border-radius: 22px !important;
+        border: 1px solid #d7e3f3 !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        box-shadow: 0 16px 28px rgba(30, 58, 95, 0.08) !important;
+        white-space: pre-line !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        align-items: flex-start !important;
+        padding: 1.1rem 1.1rem !important;
+        font-weight: 700 !important;
+        line-height: 1.55 !important;
     }
     .nav-card-marker + div[data-testid="stButton"] > button:hover {
-        border-color: #9db6db;
-        box-shadow: 0 18px 32px rgba(79, 70, 229, 0.12);
-        color: #0f172a;
+        border-color: #9db6db !important;
+        box-shadow: 0 18px 32px rgba(79, 70, 229, 0.12) !important;
+        color: #0f172a !important;
     }
     .completion-marker + div[data-testid="stButton"] > button {
-        min-height: 200px;
+        min-height: 200px !important;
+    }
+    .nav-card-marker + div[data-testid="stButton"] > button p {
+        color: #0f172a !important;
+        font-size: 1rem !important;
+        line-height: 1.6 !important;
+        margin: 0 !important;
     }
     .kpi-label {
         color: var(--text-soft);
@@ -2243,9 +2260,16 @@ st.markdown(
         background: #1e3a5f;
         color: #ffffff;
     }
-    .calendar-day.has-event {
-        box-shadow: inset 0 0 0 2px #4f46e5;
-        color: #312e81;
+    .calendar-day.pending-deadline {
+        background: #fef3c7;
+        border-color: #f59e0b;
+        color: #92400e;
+        box-shadow: inset 0 0 0 2px #facc15;
+    }
+    .calendar-day.pending-deadline.today {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        color: #92400e;
+        border-color: #f59e0b;
     }
     .upcoming-item {
         padding: 0.85rem 0.95rem;
@@ -2774,6 +2798,7 @@ if st.session_state.current_page == "Dashboard":
                 st.markdown("### Dashboard Insights")
                 overview_col, type_col = st.columns(2)
                 with overview_col:
+                    st.markdown(f"#### Monthly Activity ({selected_year})")
                     meetings_monthly = (
                         year_df.groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
                         if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
@@ -2799,16 +2824,16 @@ if st.session_state.current_page == "Dashboard":
                         x="month_label",
                         y="count",
                         color="metric",
-                        title=f"Monthly Activity ({selected_year})",
                         barmode="group",
                         color_discrete_map={"Meetings": "#1e3a5f", "Done": "#16a34a", "Overdue": "#dc2626"},
                     )
                     style_plotly(fig_overview, height=320)
                     st.plotly_chart(fig_overview, use_container_width=True)
                 with type_col:
+                    st.markdown(f"#### Meeting Type ({selected_year})")
                     month_options = ["All Months"] + sorted(year_df["month_label"].dropna().unique().tolist(), key=lambda m: list(calendar.month_abbr).index(m) if m in list(calendar.month_abbr) else 99)
-                    selected_month = st.selectbox("Meeting Type Month", month_options, key="dashboard_type_month_filter")
                     type_source = year_df.copy()
+                    selected_month = st.session_state.get("dashboard_type_month_filter", "All Months")
                     if selected_month != "All Months":
                         type_source = type_source[type_source["month_label"] == selected_month]
                     type_rollup = (
@@ -2819,13 +2844,20 @@ if st.session_state.current_page == "Dashboard":
                         type_rollup,
                         names="type",
                         values="count",
-                        title=f"Meeting Type ({selected_month if selected_month != 'All Months' else selected_year})",
                         color="type",
                         color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8", "#d97706"],
                         hole=0.45,
                     )
                     style_plotly(fig_type, height=320)
                     st.plotly_chart(fig_type, use_container_width=True)
+                    month_filter_col, _ = st.columns([0.55, 0.45])
+                    with month_filter_col:
+                        st.selectbox(
+                            "Month",
+                            month_options,
+                            key="dashboard_type_month_filter",
+                            label_visibility="collapsed",
+                        )
 
                 spend_rollup = (
                     year_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"].sum().sort_values("month_num")
@@ -2860,8 +2892,38 @@ if st.session_state.current_page == "Dashboard":
         calendar_card = st.container(border=True)
         with calendar_card:
             st.markdown("### Calendar")
-            st.caption(f"{calendar.month_name[date.today().month]} {date.today().year}")
-            st.markdown(build_calendar_html(meetings, date.today().year, date.today().month), unsafe_allow_html=True)
+            calendar_year_options = sorted(
+                set(dashboard_years + [date.today().year]),
+                reverse=True,
+            )
+            month_names = list(calendar.month_name)[1:]
+            current_month_name = calendar.month_name[date.today().month]
+            calendar_top_left, calendar_top_right = st.columns([0.56, 0.44])
+            with calendar_top_left:
+                selected_calendar_month = st.selectbox(
+                    "Calendar Month",
+                    month_names,
+                    index=month_names.index(st.session_state.get("calendar_month", current_month_name)),
+                    key="calendar_month",
+                    label_visibility="collapsed",
+                )
+            with calendar_top_right:
+                default_calendar_year = st.session_state.get("calendar_year", date.today().year)
+                year_index = calendar_year_options.index(default_calendar_year) if default_calendar_year in calendar_year_options else 0
+                selected_calendar_year = st.selectbox(
+                    "Calendar Year",
+                    calendar_year_options,
+                    index=year_index,
+                    key="calendar_year",
+                    label_visibility="collapsed",
+                )
+            selected_calendar_month_num = month_names.index(selected_calendar_month) + 1
+            st.caption(f"{selected_calendar_month} {selected_calendar_year}")
+            st.markdown(
+                build_calendar_html(meetings, selected_calendar_year, selected_calendar_month_num),
+                unsafe_allow_html=True,
+            )
+            st.caption("Yellow dates show pending action deadlines.")
 
         upcoming_card = st.container(border=True)
         with upcoming_card:
