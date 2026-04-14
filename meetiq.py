@@ -1769,11 +1769,16 @@ with tabs[0]:
             key="capture_transcript",
         )
 
-    run_col, clear_col = st.columns([0.25, 0.75])
-    with run_col:
-        run_clicked = st.button("Generate Summary", type="primary", disabled=len(transcript.strip()) < 20)
-    with clear_col:
-        st.button("Clear Input", on_click=clear_capture_inputs)
+        action_col_left, action_col_right = st.columns(2)
+        with action_col_left:
+            run_clicked = st.button(
+                "Generate Summary",
+                type="primary",
+                use_container_width=True,
+                disabled=not transcript.strip(),
+            )
+        with action_col_right:
+            st.button("Clear Input", on_click=clear_capture_inputs, use_container_width=True)
 
     resolved_activity_id = st.session_state.capture_activity_id.strip() or generate_activity_id(
         activity_category or activity_type or "ACT",
