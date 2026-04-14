@@ -173,6 +173,11 @@ def set_current_page(page_name: str):
     st.session_state.current_page = page_name
 
 
+def set_tracker_shortcut(mode: str):
+    st.session_state.current_page = "Tracker"
+    st.session_state.tracker_focus = mode
+
+
 def clear_capture_inputs():
     st.session_state.pending_result = None
     st.session_state.capture_transcript = ""
@@ -1513,30 +1518,24 @@ st.markdown(
         font-weight: 700;
     }
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #4657c8 0%, #3246af 100%);
-        border-right: 1px solid rgba(255,255,255,0.12);
+        background: linear-gradient(180deg, #3647b7 0%, #24338d 100%);
+        border-right: 1px solid rgba(255,255,255,0.10);
     }
     section[data-testid="stSidebar"] .block-container {
         padding-top: 1rem;
         padding-bottom: 1rem;
     }
-    .sidebar-brand {
-        background: rgba(255,255,255,0.95);
-        border-radius: 22px;
-        padding: 1rem 0.95rem;
-        margin-bottom: 0.85rem;
-        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.10);
-    }
-    .sidebar-brand h3 {
-        margin: 0;
-        color: #1e3a5f !important;
-        font-size: 1.35rem;
+    .sidebar-title {
+        margin: 0 0 1rem;
+        color: #ffffff !important;
+        font-size: 1.45rem;
         font-weight: 800;
+        letter-spacing: 0.01em;
     }
-    .sidebar-brand p {
-        margin: 0.35rem 0 0;
-        color: #64748b;
-        font-size: 0.92rem;
+    .sidebar-subtitle {
+        margin: -0.7rem 0 1rem;
+        color: rgba(255,255,255,0.78);
+        font-size: 0.88rem;
     }
     section[data-testid="stSidebar"] .stButton > button {
         border-radius: 18px !important;
@@ -1544,6 +1543,9 @@ st.markdown(
         border: 0 !important;
         font-weight: 700 !important;
         box-shadow: none !important;
+        background: rgba(255,255,255,0.12) !important;
+        color: #ffffff !important;
+        backdrop-filter: blur(4px);
     }
     h2, h3, label, .stMarkdown, .stCaption, .stRadio label, .stSelectbox label {
         color: var(--text) !important;
@@ -1976,6 +1978,8 @@ def init_state():
         st.session_state.capture_activity_id = ""
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Dashboard"
+    if "tracker_focus" not in st.session_state:
+        st.session_state.tracker_focus = "all"
 
 
 init_state()
@@ -1998,10 +2002,8 @@ action_df = build_action_dataframe(meetings)
 with st.sidebar:
     st.markdown(
         """
-        <div class="sidebar-brand">
-            <h3>MeetIQ</h3>
-            <p>Pick a workspace area.</p>
-        </div>
+        <div class="sidebar-title">AI-Powered Meeting Insight Generator &amp; Action Tracker</div>
+        <div class="sidebar-subtitle">for Talentcorp by z</div>
         """,
         unsafe_allow_html=True,
     )
@@ -2363,10 +2365,31 @@ if st.session_state.current_page == "Dashboard":
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
                 render_kpi_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706")
+                st.button(
+                    "Open in Tracker",
+                    key="dashboard_open_tasks_btn",
+                    use_container_width=True,
+                    on_click=set_tracker_shortcut,
+                    args=("open",),
+                )
             with c3:
                 render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
+                st.button(
+                    "View Completed",
+                    key="dashboard_done_btn",
+                    use_container_width=True,
+                    on_click=set_tracker_shortcut,
+                    args=("done",),
+                )
             with c4:
                 render_completion_ring(completion_pct)
+                st.button(
+                    "See Completion",
+                    key="dashboard_completion_btn",
+                    use_container_width=True,
+                    on_click=set_tracker_shortcut,
+                    args=("done",),
+                )
 
         if not meeting_df.empty:
             year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
@@ -2508,6 +2531,12 @@ if st.session_state.current_page == "Tracker":
     if action_df.empty:
         st.info("No action items yet.")
     else:
+        tracker_focus = st.session_state.get("tracker_focus", "all")
+        if tracker_focus == "open":
+            st.caption("Showing open items from the dashboard shortcut.")
+        elif tracker_focus == "done":
+            st.caption("Showing completed items from the dashboard shortcut.")
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             render_kpi_card("Open Actions", str(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])), "Work still active", "#0f766e")
@@ -2527,6 +2556,15 @@ if st.session_state.current_page == "Tracker":
             action_search = st.text_input("Search action", placeholder="Search by task, assignee, or meeting")
 
         filtered_actions = filter_action_records(action_df, company_filter, status_filter, action_search)
+        if tracker_focus == "open":
+            filtered_actions = filtered_actions[filtered_actions["status"].isin(["Pending", "In Progress", "Overdue"])]
+        elif tracker_focus == "done":
+            filtered_actions = filtered_actions[filtered_actions["status"] == "Done"]
+
+        if tracker_focus != "all":
+            if st.button("Clear Tracker Shortcut", key="clear_tracker_shortcut"):
+                st.session_state.tracker_focus = "all"
+                st.rerun()
 
         st.markdown("### Action Queue")
         if filtered_actions.empty:
