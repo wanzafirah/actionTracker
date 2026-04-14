@@ -110,6 +110,10 @@ STATUS_CFG = {
 # ============================================================
 
 def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
+    headers = {}
+    if "ngrok" in OLLAMA_URL:
+        headers["ngrok-skip-browser-warning"] = "true"
+
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": user_msg,
@@ -123,7 +127,7 @@ def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
         },
     }
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=300)
+        response = requests.post(OLLAMA_URL, json=payload, headers=headers, timeout=300)
         response.raise_for_status()
         return response.json().get("response", "")
     except requests.HTTPError as exc:
