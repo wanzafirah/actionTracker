@@ -1460,45 +1460,51 @@ st.markdown(
         box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
     }
     .hero-shell {
-        background:
-            linear-gradient(to right, rgba(242, 71, 44, 0.98), rgba(242, 71, 44, 0.98)),
-            linear-gradient(#f3d4cd 1px, transparent 1px),
-            linear-gradient(90deg, #f3d4cd 1px, transparent 1px);
-        background-size: auto, 92px 92px, 92px 92px;
-        background-position: center, center, center;
-        color: #f8f1e4;
-        border-radius: 28px;
-        padding: 1.3rem 1.6rem 1.4rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 18px 36px rgba(242, 71, 44, 0.18);
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 42%, #4f46e5 100%);
+        color: white;
+        border-radius: 24px;
+        padding: 1.45rem 1.8rem 1.35rem;
+        margin-bottom: 1.15rem;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
         position: relative;
         overflow: hidden;
-        border: 4px solid #f7eee1;
     }
     .hero-shell::before {
         content: "";
         position: absolute;
-        inset: 24px;
-        border: 2px solid rgba(248, 241, 228, 0.6);
-        border-radius: 24px;
+        top: -30px;
+        right: 22%;
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.10);
+        filter: blur(2px);
+    }
+    .hero-shell::after {
+        content: "";
+        position: absolute;
+        inset: auto -40px -40px auto;
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.08);
     }
     .hero-shell h1 {
         margin: 0;
-        font-size: 2.05rem;
-        line-height: 1.06;
+        font-size: 2.15rem;
+        line-height: 1.1;
         letter-spacing: 0.02em;
-        color: #fff6ea !important;
+        color: #ffffff !important;
         text-align: left;
-        font-weight: 900;
-        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
-        text-transform: uppercase;
+        font-weight: 800;
+        font-family: "Trebuchet MS", "Segoe UI", "Verdana", sans-serif;
         position: relative;
         z-index: 1;
         max-width: 54rem;
     }
     .hero-shell p {
-        margin: 0.55rem 0 0;
-        color: #fff4ea;
+        margin: 0.35rem 0 0;
+        color: rgba(255,255,255,0.92);
         max-width: 42rem;
         text-align: left;
         font-size: 1rem;
@@ -1506,37 +1512,38 @@ st.markdown(
         z-index: 1;
         font-weight: 700;
     }
-    .app-shell {
-        display: grid;
-        grid-template-columns: 210px minmax(0, 1fr);
-        gap: 1rem;
-        align-items: start;
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #4657c8 0%, #3246af 100%);
+        border-right: 1px solid rgba(255,255,255,0.12);
     }
-    .side-nav {
-        background: rgba(255,255,255,0.88);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.07);
-        padding: 1rem 0.75rem;
-        position: sticky;
-        top: 1rem;
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
-    .side-nav-title {
-        font-size: 1.15rem;
+    .sidebar-brand {
+        background: rgba(255,255,255,0.95);
+        border-radius: 22px;
+        padding: 1rem 0.95rem;
+        margin-bottom: 0.85rem;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.10);
+    }
+    .sidebar-brand h3 {
+        margin: 0;
+        color: #1e3a5f !important;
+        font-size: 1.35rem;
         font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.15rem;
     }
-    .side-nav-copy {
-        color: var(--text-soft);
-        font-size: 0.88rem;
-        margin: 0 0 0.9rem;
+    .sidebar-brand p {
+        margin: 0.35rem 0 0;
+        color: #64748b;
+        font-size: 0.92rem;
     }
-    .nav-button {
-        margin-bottom: 0.55rem;
-    }
-    .page-shell {
-        min-width: 0;
+    section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 18px !important;
+        min-height: 3rem;
+        border: 0 !important;
+        font-weight: 700 !important;
+        box-shadow: none !important;
     }
     h2, h3, label, .stMarkdown, .stCaption, .stRadio label, .stSelectbox label {
         color: var(--text) !important;
@@ -1988,14 +1995,12 @@ meetings = st.session_state.meetings
 meeting_df = build_meeting_dataframe(meetings)
 action_df = build_action_dataframe(meetings)
 
-st.markdown('<div class="app-shell">', unsafe_allow_html=True)
-nav_col, page_col = st.columns([0.2, 0.8])
-with nav_col:
+with st.sidebar:
     st.markdown(
         """
-        <div class="side-nav">
-            <div class="side-nav-title">MeetIQ</div>
-            <div class="side-nav-copy">Pick a workspace area.</div>
+        <div class="sidebar-brand">
+            <h3>MeetIQ</h3>
+            <p>Pick a workspace area.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2032,8 +2037,6 @@ with nav_col:
         on_click=set_current_page,
         args=("Finance",),
     )
-with page_col:
-    st.markdown('<div class="page-shell">', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2632,7 +2635,3 @@ if st.session_state.current_page == "Finance":
             unsafe_allow_html=True,
         )
         st.progress(pct / 100 if budget else 0)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
