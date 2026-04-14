@@ -293,7 +293,7 @@ def sync_page_from_query():
     except Exception:
         return
 
-    if page_value in {"Dashboard", "Capture", "Tracker", "Finance"}:
+    if page_value in {"Dashboard", "Productivity", "Capture", "Tracker", "Finance"}:
         st.session_state.current_page = page_value
     if focus_value in {"all", "open", "done"}:
         st.session_state.tracker_focus = focus_value
@@ -460,6 +460,10 @@ def style_plotly(fig, height: int = 360):
     fig.update_xaxes(showgrid=False, color="#334155")
     fig.update_yaxes(gridcolor="#e2e8f0", zerolinecolor="#e2e8f0", color="#334155")
     return fig
+
+
+def render_plotly_chart(fig, use_container_width: bool = True):
+    st.plotly_chart(fig, use_container_width=use_container_width, config={"displayModeBar": False})
 
 
 @st.cache_resource
@@ -1271,15 +1275,7 @@ def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
 
 
 def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str, key: str) -> None:
-    label = f"{title.upper()}\n{value}\n{subtitle}"
-    st.markdown("<div class='nav-card-marker'></div>", unsafe_allow_html=True)
-    st.button(
-        label,
-        key=key,
-        use_container_width=True,
-        on_click=set_tracker_shortcut,
-        args=(focus,),
-    )
+    render_kpi_card(title, value, subtitle, accent)
 
 
 def render_completion_ring(percent: int) -> None:
@@ -1302,15 +1298,7 @@ def render_completion_ring(percent: int) -> None:
 
 def render_completion_link_ring(percent: int, page: str, focus: str, key: str) -> None:
     safe_percent = max(0, min(int(percent), 100))
-    label = f"COMPLETION\n{safe_percent}%\nAction completeness"
-    st.markdown("<div class='nav-card-marker completion-marker'></div>", unsafe_allow_html=True)
-    st.button(
-        label,
-        key=key,
-        use_container_width=True,
-        on_click=set_tracker_shortcut,
-        args=(focus,),
-    )
+    render_completion_ring(safe_percent)
 
 
 def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
@@ -2432,6 +2420,14 @@ with st.sidebar:
         args=("Dashboard",),
     )
     st.button(
+        "Productivity",
+        key="nav_productivity",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Productivity" else "secondary",
+        on_click=set_current_page,
+        args=("Productivity",),
+    )
+    st.button(
         "Capture",
         key="nav_capture",
         use_container_width=True,
@@ -2758,19 +2754,11 @@ if st.session_state.current_page == "Dashboard":
     st.subheader("Dashboard")
 
     dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
-    selected_year = st.selectbox("Dashboard Year", dashboard_years, key="dashboard_year_filter")
 
     done_count = int((action_df["status"] == "Done").sum()) if not action_df.empty else 0
     overdue_count = int((action_df["status"] == "Overdue").sum()) if not action_df.empty else 0
     open_count = int(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])) if not action_df.empty else 0
     completion_pct = round((done_count / len(action_df)) * 100) if not action_df.empty and len(action_df) else 0
-
-    dashboard_search = st.text_input(
-        "Search meetings",
-        placeholder="Search event name, ID, or group name...",
-        label_visibility="collapsed",
-        key="dashboard_search",
-    )
 
     dashboard_left, dashboard_right = st.columns([1.35, 0.85])
     with dashboard_left:
@@ -2781,112 +2769,11 @@ if st.session_state.current_page == "Dashboard":
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_link_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706", "Tracker", "open", "open_tasks_card")
+                render_kpi_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706")
             with c3:
-                render_kpi_link_card("Done", str(done_count), "Completed actions", "#16a34a", "Tracker", "done", "done_tasks_card")
+                render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
             with c4:
-                render_completion_link_ring(completion_pct, "Tracker", "done", "completion_card")
-
-        if not meeting_df.empty:
-            year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
-            year_actions_df = add_month_columns(
-                action_df[action_df["meeting_date"].astype(str).str.startswith(str(selected_year))].copy() if not action_df.empty else pd.DataFrame(),
-                "meeting_date",
-            )
-            insights_card = st.container(border=True)
-            with insights_card:
-                st.markdown("### Dashboard Insights")
-                overview_col, type_col = st.columns(2)
-                with overview_col:
-                    st.markdown(f"#### Monthly Activity ({selected_year})")
-                    meetings_monthly = (
-                        year_df.groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
-                        if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
-                    )
-                    done_monthly = (
-                        year_actions_df[year_actions_df["status"] == "Done"].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
-                        if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
-                    )
-                    overdue_monthly = (
-                        year_actions_df[year_actions_df["status"] == "Overdue"].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
-                        if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
-                    )
-                    overview_df = pd.concat(
-                        [
-                            meetings_monthly.assign(metric="Meetings"),
-                            done_monthly.assign(metric="Done"),
-                            overdue_monthly.assign(metric="Overdue"),
-                        ],
-                        ignore_index=True,
-                    ).sort_values("month_num")
-                    fig_overview = px.bar(
-                        overview_df,
-                        x="month_label",
-                        y="count",
-                        color="metric",
-                        barmode="group",
-                        color_discrete_map={"Meetings": "#1e3a5f", "Done": "#16a34a", "Overdue": "#dc2626"},
-                    )
-                    style_plotly(fig_overview, height=320)
-                    st.plotly_chart(fig_overview, use_container_width=True)
-                with type_col:
-                    st.markdown(f"#### Meeting Type ({selected_year})")
-                    month_options = ["All Months"] + sorted(year_df["month_label"].dropna().unique().tolist(), key=lambda m: list(calendar.month_abbr).index(m) if m in list(calendar.month_abbr) else 99)
-                    type_source = year_df.copy()
-                    selected_month = st.session_state.get("dashboard_type_month_filter", "All Months")
-                    if selected_month != "All Months":
-                        type_source = type_source[type_source["month_label"] == selected_month]
-                    type_rollup = (
-                        type_source.groupby(["type"], as_index=False).size().rename(columns={"size": "count"})
-                        if not type_source.empty else pd.DataFrame(columns=["type", "count"])
-                    )
-                    fig_type = px.pie(
-                        type_rollup,
-                        names="type",
-                        values="count",
-                        color="type",
-                        color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8", "#d97706"],
-                        hole=0.45,
-                    )
-                    style_plotly(fig_type, height=320)
-                    st.plotly_chart(fig_type, use_container_width=True)
-                    month_filter_col, _ = st.columns([0.55, 0.45])
-                    with month_filter_col:
-                        st.selectbox(
-                            "Month",
-                            month_options,
-                            key="dashboard_type_month_filter",
-                            label_visibility="collapsed",
-                        )
-
-                spend_rollup = (
-                    year_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"].sum().sort_values("month_num")
-                    if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "department", "cost"])
-                )
-                fig_spend = px.line(
-                    spend_rollup,
-                    x="month_label",
-                    y="cost",
-                    color="department",
-                    title=f"Monthly Budget Spend by Department ({selected_year})",
-                    markers=True,
-                    color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
-                )
-                style_plotly(fig_spend, height=340)
-                st.plotly_chart(fig_spend, use_container_width=True)
-
-        results_card = st.container(border=True)
-        with results_card:
-            st.markdown("### Search Results")
-            if not meetings:
-                st.info("No meetings stored yet. Capture one to start building the dashboard.")
-            else:
-                matched_meetings = search_meetings(meetings, dashboard_search)
-                if not matched_meetings:
-                    st.info("No matching meetings found.")
-                else:
-                    for meeting in matched_meetings[:5]:
-                        render_search_result_card(meeting)
+                render_completion_ring(completion_pct)
 
     with dashboard_right:
         calendar_card = st.container(border=True)
@@ -2961,7 +2848,121 @@ if st.session_state.current_page == "Dashboard":
 
 
 # ============================================================
-# Section 9. Action Tracker Tab
+# Section 9. Productivity Page
+# ============================================================
+
+if st.session_state.current_page == "Productivity":
+    st.subheader("Productivity Dashboard")
+
+    productivity_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
+    selected_year = st.selectbox("Year", productivity_years, key="productivity_year_filter")
+
+    if meeting_df.empty:
+        st.info("No meeting data yet.")
+    else:
+        year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
+        year_actions_df = add_month_columns(
+            action_df[action_df["meeting_date"].astype(str).str.startswith(str(selected_year))].copy() if not action_df.empty else pd.DataFrame(),
+            "meeting_date",
+        )
+
+        top_left, top_right = st.columns(2)
+        with top_left:
+            st.markdown(f"#### Total Meetings per Month ({selected_year})")
+            meetings_monthly = (
+                year_df.groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+            )
+            fig_meetings = px.bar(
+                meetings_monthly.sort_values("month_num"),
+                x="month_label",
+                y="count",
+                color_discrete_sequence=["#1e3a5f"],
+            )
+            style_plotly(fig_meetings, height=320)
+            render_plotly_chart(fig_meetings)
+
+        with top_right:
+            st.markdown(f"#### Meeting Type ({selected_year})")
+            month_options = ["All Months"] + sorted(
+                year_df["month_label"].dropna().unique().tolist(),
+                key=lambda m: list(calendar.month_abbr).index(m) if m in list(calendar.month_abbr) else 99,
+            )
+            selected_month = st.session_state.get("productivity_type_month_filter", "All Months")
+            type_source = year_df.copy()
+            if selected_month != "All Months":
+                type_source = type_source[type_source["month_label"] == selected_month]
+            type_rollup = (
+                type_source.groupby(["type"], as_index=False).size().rename(columns={"size": "count"})
+                if not type_source.empty else pd.DataFrame(columns=["type", "count"])
+            )
+            fig_type = px.pie(
+                type_rollup,
+                names="type",
+                values="count",
+                color="type",
+                color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8", "#d97706"],
+                hole=0.45,
+            )
+            style_plotly(fig_type, height=320)
+            render_plotly_chart(fig_type)
+            month_filter_col, _ = st.columns([0.55, 0.45])
+            with month_filter_col:
+                st.selectbox(
+                    "Month",
+                    month_options,
+                    key="productivity_type_month_filter",
+                    label_visibility="collapsed",
+                )
+
+        bottom_left, bottom_right = st.columns(2)
+        with bottom_left:
+            st.markdown(f"#### Completed vs Uncomplete per Month ({selected_year})")
+            completed_monthly = (
+                year_actions_df[year_actions_df["status"] == "Done"].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+            )
+            uncomplete_monthly = (
+                year_actions_df[year_actions_df["status"].isin(["Pending", "In Progress", "Overdue"])].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+            )
+            completion_df = pd.concat(
+                [
+                    completed_monthly.assign(metric="Completed"),
+                    uncomplete_monthly.assign(metric="Uncomplete"),
+                ],
+                ignore_index=True,
+            ).sort_values("month_num")
+            fig_completion = px.bar(
+                completion_df,
+                x="month_label",
+                y="count",
+                color="metric",
+                barmode="group",
+                color_discrete_map={"Completed": "#16a34a", "Uncomplete": "#d97706"},
+            )
+            style_plotly(fig_completion, height=320)
+            render_plotly_chart(fig_completion)
+
+        with bottom_right:
+            st.markdown(f"#### Monthly Budget Spend ({selected_year})")
+            spend_rollup = (
+                year_df.groupby(["month_num", "month_label"], as_index=False)["cost"].sum().sort_values("month_num")
+                if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "cost"])
+            )
+            fig_spend = px.line(
+                spend_rollup,
+                x="month_label",
+                y="cost",
+                markers=True,
+                color_discrete_sequence=["#1e3a5f"],
+            )
+            style_plotly(fig_spend, height=320)
+            render_plotly_chart(fig_spend)
+
+
+# ============================================================
+# Section 10. Action Tracker Tab
 # ============================================================
 
 if st.session_state.current_page == "Tracker":
