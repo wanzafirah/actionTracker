@@ -2751,8 +2751,6 @@ if st.session_state.current_page == "Capture":
 # ============================================================
 
 if st.session_state.current_page == "Dashboard":
-    st.subheader("Dashboard")
-
     dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
 
     done_count = int((action_df["status"] == "Done").sum()) if not action_df.empty else 0
