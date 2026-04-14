@@ -13,6 +13,11 @@ import requests
 import streamlit as st
 
 try:
+    import gspread
+except ImportError:
+    gspread = None
+
+try:
     import whisper
 except ImportError:
     whisper = None
@@ -36,6 +41,66 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.2"
 WHISPER_MODEL = "tiny"
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetiq_data.xlsx")
+MEETINGS_SHEET_NAME = "meetings"
+DEPARTMENTS_SHEET_NAME = "departments"
+MEETING_SHEET_COLUMNS = [
+    "id",
+    "title",
+    "date",
+    "meeting date",
+    "type",
+    "meeting type",
+    "category",
+    "district",
+    "summary",
+    "objective",
+    "outcome",
+    "followUp",
+    "followup",
+    "followUpReason",
+    "stakeholders",
+    "companies",
+    "keyDecisions",
+    "discussionPoints",
+    "nlpStats",
+    "transcript",
+    "deptId",
+    "deptName",
+    "department",
+    "actualCost",
+    "budgetUsed",
+    "estimatedCost",
+    "budgetNotes",
+    "actions",
+    "activityCategory",
+    "activityId",
+    "meetingID",
+    "activityTitle",
+    "role",
+    "mainActivity",
+    "linkPhoto",
+    "linkPhotoUrl",
+    "attach file",
+    "activityType",
+    "organizationType",
+    "dateFrom",
+    "dateTo",
+    "representativePosition",
+    "representativeName",
+    "representativeDepartment",
+    "activityObjective",
+    "invitationfrom",
+    "location meeting",
+    "other reps",
+    "recaps",
+    "sltdepartment",
+    "sltposition",
+    "sltreps",
+    "stfemail",
+    "supemail",
+    "updated by",
+]
+DEPARTMENT_SHEET_COLUMNS = ["id", "name", "budget"]
 
 
 def get_ollama_url() -> str:
@@ -48,6 +113,49 @@ def get_ollama_url() -> str:
 
 
 OLLAMA_URL = get_ollama_url()
+
+
+def get_secret_value(name: str, default=""):
+    try:
+        value = st.secrets.get(name, default)
+        return value if value not in (None, "") else default
+    except Exception:
+        return default
+
+
+def get_google_service_account_info():
+    try:
+        secret_value = st.secrets.get("gcp_service_account")
+        if secret_value:
+            return dict(secret_value)
+    except Exception:
+        pass
+
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if raw_json:
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def get_google_sheet_target() -> dict:
+    return {
+        "id": os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_ID", "")),
+        "url": os.getenv("GOOGLE_SHEETS_SPREADSHEET_URL", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_URL", "")),
+        "name": os.getenv("GOOGLE_SHEETS_SPREADSHEET_NAME", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_NAME", "")),
+    }
+
+
+def get_supabase_config() -> dict:
+    url = os.getenv("SUPABASE_URL", get_secret_value("SUPABASE_URL", ""))
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", get_secret_value("SUPABASE_SERVICE_ROLE_KEY", ""))
+        or os.getenv("SUPABASE_KEY", get_secret_value("SUPABASE_KEY", ""))
+        or os.getenv("SUPABASE_ANON_KEY", get_secret_value("SUPABASE_ANON_KEY", ""))
+    )
+    return {"url": url.rstrip("/"), "key": key}
 
 STATUSES = ["Pending", "In Progress", "Done", "Overdue", "Cancelled"]
 MTG_TYPES = ["Virtual", "Physical", "Not Provided"]
@@ -485,20 +593,7 @@ def load_text_list(value) -> list:
     return [text] if text else []
 
 
-def load_excel_data():
-    if not os.path.exists(DATA_FILE):
-        return [], []
-
-    try:
-        meetings_df = pd.read_excel(DATA_FILE, sheet_name="meetings")
-    except Exception:
-        meetings_df = pd.DataFrame()
-
-    try:
-        departments_df = pd.read_excel(DATA_FILE, sheet_name="departments")
-    except Exception:
-        departments_df = pd.DataFrame()
-
+def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFrame):
     meetings = []
     if not meetings_df.empty:
         for row in meetings_df.fillna("").to_dict("records"):
@@ -574,7 +669,7 @@ def load_excel_data():
     return meetings, departments
 
 
-def save_excel_data(meetings: list, departments: list):
+def build_meeting_rows(meetings: list) -> list:
     meetings_rows = []
     for meeting in meetings:
         attach_file_value = normalize_value(
@@ -640,8 +735,11 @@ def save_excel_data(meetings: list, departments: list):
                 "updated by": meeting.get("updatedBy", ""),
             }
         )
+    return meetings_rows
 
-    departments_rows = [
+
+def build_department_rows(departments: list) -> list:
+    return [
         {
             "id": department.get("id", ""),
             "name": department.get("name", ""),
@@ -650,13 +748,193 @@ def save_excel_data(meetings: list, departments: list):
         for department in departments
     ]
 
+
+def load_excel_data():
+    if not os.path.exists(DATA_FILE):
+        return [], []
+
+    try:
+        meetings_df = pd.read_excel(DATA_FILE, sheet_name=MEETINGS_SHEET_NAME)
+    except Exception:
+        meetings_df = pd.DataFrame()
+
+    try:
+        departments_df = pd.read_excel(DATA_FILE, sheet_name=DEPARTMENTS_SHEET_NAME)
+    except Exception:
+        departments_df = pd.DataFrame()
+
+    return parse_loaded_dataframes(meetings_df, departments_df)
+
+
+def save_excel_data(meetings: list, departments: list):
+    meetings_rows = build_meeting_rows(meetings)
+    departments_rows = build_department_rows(departments)
+
     with pd.ExcelWriter(DATA_FILE, engine="openpyxl") as writer:
-        pd.DataFrame(meetings_rows).to_excel(writer, sheet_name="meetings", index=False)
-        pd.DataFrame(departments_rows).to_excel(writer, sheet_name="departments", index=False)
+        pd.DataFrame(meetings_rows, columns=MEETING_SHEET_COLUMNS).to_excel(writer, sheet_name=MEETINGS_SHEET_NAME, index=False)
+        pd.DataFrame(departments_rows, columns=DEPARTMENT_SHEET_COLUMNS).to_excel(writer, sheet_name=DEPARTMENTS_SHEET_NAME, index=False)
+
+
+@st.cache_resource
+def get_google_spreadsheet():
+    service_account_info = get_google_service_account_info()
+    target = get_google_sheet_target()
+    if gspread is None or not service_account_info:
+        return None
+
+    if not any(target.values()):
+        return None
+
+    client = gspread.service_account_from_dict(service_account_info)
+    if target["id"]:
+        return client.open_by_key(target["id"])
+    if target["url"]:
+        return client.open_by_url(target["url"])
+    return client.open(target["name"])
+
+
+def get_or_create_google_worksheet(spreadsheet, title: str, columns: list):
+    try:
+        worksheet = spreadsheet.worksheet(title)
+    except Exception:
+        worksheet = spreadsheet.add_worksheet(title=title, rows=max(100, len(columns) + 20), cols=len(columns))
+
+    header = worksheet.row_values(1)
+    if header != columns:
+        worksheet.clear()
+        worksheet.update("A1", [columns])
+    return worksheet
+
+
+def load_google_sheet_data():
+    spreadsheet = get_google_spreadsheet()
+    if spreadsheet is None:
+        return None
+
+    try:
+        meetings_ws = get_or_create_google_worksheet(spreadsheet, MEETINGS_SHEET_NAME, MEETING_SHEET_COLUMNS)
+        departments_ws = get_or_create_google_worksheet(spreadsheet, DEPARTMENTS_SHEET_NAME, DEPARTMENT_SHEET_COLUMNS)
+        meetings_df = pd.DataFrame(meetings_ws.get_all_records())
+        departments_df = pd.DataFrame(departments_ws.get_all_records())
+        return parse_loaded_dataframes(meetings_df, departments_df)
+    except Exception:
+        return None
+
+
+def save_google_sheet_data(meetings: list, departments: list):
+    spreadsheet = get_google_spreadsheet()
+    if spreadsheet is None:
+        raise RuntimeError(
+            "Google Sheets storage is not configured. Add gcp_service_account and a spreadsheet ID, URL, or name in Streamlit secrets."
+        )
+
+    meetings_rows = build_meeting_rows(meetings)
+    departments_rows = build_department_rows(departments)
+
+    meetings_ws = get_or_create_google_worksheet(spreadsheet, MEETINGS_SHEET_NAME, MEETING_SHEET_COLUMNS)
+    meetings_values = [MEETING_SHEET_COLUMNS] + [
+        [row.get(column, "") for column in MEETING_SHEET_COLUMNS]
+        for row in meetings_rows
+    ]
+    meetings_ws.clear()
+    meetings_ws.update("A1", meetings_values)
+
+    departments_ws = get_or_create_google_worksheet(spreadsheet, DEPARTMENTS_SHEET_NAME, DEPARTMENT_SHEET_COLUMNS)
+    departments_values = [DEPARTMENT_SHEET_COLUMNS] + [
+        [row.get(column, "") for column in DEPARTMENT_SHEET_COLUMNS]
+        for row in departments_rows
+    ]
+    departments_ws.clear()
+    departments_ws.update("A1", departments_values)
+
+
+def supabase_headers(prefer: str = "") -> dict | None:
+    config = get_supabase_config()
+    if not config["url"] or not config["key"]:
+        return None
+
+    headers = {
+        "apikey": config["key"],
+        "Authorization": f"Bearer {config['key']}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def supabase_table_url(table_name: str) -> str | None:
+    config = get_supabase_config()
+    if not config["url"]:
+        return None
+    return f"{config['url']}/rest/v1/{table_name}"
+
+
+def load_supabase_data():
+    headers = supabase_headers()
+    meetings_url = supabase_table_url(MEETINGS_SHEET_NAME)
+    departments_url = supabase_table_url(DEPARTMENTS_SHEET_NAME)
+    if headers is None or meetings_url is None or departments_url is None:
+        return None
+
+    try:
+        meetings_response = requests.get(meetings_url, headers=headers, params={"select": "*"}, timeout=30)
+        departments_response = requests.get(departments_url, headers=headers, params={"select": "*"}, timeout=30)
+        meetings_response.raise_for_status()
+        departments_response.raise_for_status()
+        meetings_df = pd.DataFrame(meetings_response.json())
+        departments_df = pd.DataFrame(departments_response.json())
+        return parse_loaded_dataframes(meetings_df, departments_df)
+    except Exception:
+        return None
+
+
+def replace_supabase_table(table_name: str, rows: list, columns: list):
+    headers = supabase_headers(prefer="return=minimal")
+    table_url = supabase_table_url(table_name)
+    if headers is None or table_url is None:
+        raise RuntimeError("Supabase storage is not configured.")
+
+    delete_response = requests.delete(table_url, headers=headers, params={"id": "neq.__keep__"}, timeout=30)
+    delete_response.raise_for_status()
+
+    if not rows:
+        return
+
+    payload = [{column: row.get(column, "") for column in columns} for row in rows]
+    insert_response = requests.post(table_url, headers=headers, json=payload, timeout=30)
+    insert_response.raise_for_status()
+
+
+def save_supabase_data(meetings: list, departments: list):
+    meeting_rows = build_meeting_rows(meetings)
+    department_rows = build_department_rows(departments)
+    replace_supabase_table(MEETINGS_SHEET_NAME, meeting_rows, MEETING_SHEET_COLUMNS)
+    replace_supabase_table(DEPARTMENTS_SHEET_NAME, department_rows, DEPARTMENT_SHEET_COLUMNS)
+
+
+def load_app_data():
+    supabase_data = load_supabase_data()
+    if supabase_data is not None:
+        return supabase_data
+
+    google_data = load_google_sheet_data()
+    if google_data is not None:
+        return google_data
+    return load_excel_data()
+
+
+def save_app_data(meetings: list, departments: list):
+    if supabase_headers() is not None:
+        save_supabase_data(meetings, departments)
+    elif get_google_spreadsheet() is not None:
+        save_google_sheet_data(meetings, departments)
+    else:
+        save_excel_data(meetings, departments)
 
 
 def persist_app_data():
-    save_excel_data(st.session_state.meetings, st.session_state.departments)
+    save_app_data(st.session_state.meetings, st.session_state.departments)
 
 
 def seed_default_departments():
@@ -993,18 +1271,14 @@ def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
 
 
 def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str, key: str) -> None:
-    href = f"?page={page}&focus={focus}"
-    st.markdown(
-        f"""
-        <a class="card-link" href="{href}" target="_self">
-            <div class="kpi-card clickable-card">
-                <div class="kpi-label">{title}</div>
-                <div class="kpi-value" style="color:{accent}">{value}</div>
-                <div class="kpi-subtitle">{subtitle}</div>
-            </div>
-        </a>
-        """,
-        unsafe_allow_html=True,
+    label = f"{title.upper()}\n{value}\n{subtitle}"
+    st.markdown("<div class='nav-card-marker'></div>", unsafe_allow_html=True)
+    st.button(
+        label,
+        key=key,
+        use_container_width=True,
+        on_click=set_tracker_shortcut,
+        args=(focus,),
     )
 
 
@@ -1028,22 +1302,14 @@ def render_completion_ring(percent: int) -> None:
 
 def render_completion_link_ring(percent: int, page: str, focus: str, key: str) -> None:
     safe_percent = max(0, min(int(percent), 100))
-    href = f"?page={page}&focus={focus}"
-    st.markdown(
-        f"""
-        <a class="card-link" href="{href}" target="_self">
-            <div class="completion-card clickable-card">
-                <div class="kpi-label">Completion</div>
-                <div class="completion-wrap">
-                    <div class="completion-ring" style="--pct:{safe_percent};">
-                        <div class="completion-inner">{safe_percent}%</div>
-                    </div>
-                </div>
-                <div class="kpi-subtitle">Action completeness</div>
-            </div>
-        </a>
-        """,
-        unsafe_allow_html=True,
+    label = f"COMPLETION\n{safe_percent}%\nAction completeness"
+    st.markdown("<div class='nav-card-marker completion-marker'></div>", unsafe_allow_html=True)
+    st.button(
+        label,
+        key=key,
+        use_container_width=True,
+        on_click=set_tracker_shortcut,
+        args=(focus,),
     )
 
 
@@ -1719,6 +1985,29 @@ st.markdown(
         padding: 1rem 1.05rem;
         min-height: 108px;
     }
+    .nav-card-marker + div[data-testid="stButton"] > button {
+        min-height: 168px;
+        border-radius: 22px;
+        border: 1px solid #d7e3f3;
+        background: #ffffff;
+        color: #0f172a;
+        box-shadow: 0 16px 28px rgba(30, 58, 95, 0.08);
+        white-space: pre-line;
+        text-align: left;
+        justify-content: flex-start;
+        align-items: flex-start;
+        padding: 1.1rem 1.1rem;
+        font-weight: 700;
+        line-height: 1.55;
+    }
+    .nav-card-marker + div[data-testid="stButton"] > button:hover {
+        border-color: #9db6db;
+        box-shadow: 0 18px 32px rgba(79, 70, 229, 0.12);
+        color: #0f172a;
+    }
+    .completion-marker + div[data-testid="stButton"] > button {
+        min-height: 200px;
+    }
     .kpi-label {
         color: var(--text-soft);
         font-size: 0.86rem;
@@ -2073,7 +2362,7 @@ st.markdown(
 
 def init_state():
     if "data_loaded" not in st.session_state:
-        meetings, departments = load_excel_data()
+        meetings, departments = load_app_data()
         st.session_state.meetings = meetings
         st.session_state.departments = departments
         st.session_state.data_loaded = True
@@ -2096,7 +2385,6 @@ def init_state():
 
 
 init_state()
-sync_page_from_query()
 seed_default_departments()
 
 meetings = st.session_state.meetings
