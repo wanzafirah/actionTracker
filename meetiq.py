@@ -940,6 +940,24 @@ def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
     )
 
 
+def render_completion_ring(percent: int) -> None:
+    safe_percent = max(0, min(int(percent), 100))
+    st.markdown(
+        f"""
+        <div class="completion-card">
+            <div class="kpi-label">Completion</div>
+            <div class="completion-wrap">
+                <div class="completion-ring" style="--pct:{safe_percent};">
+                    <div class="completion-inner">{safe_percent}%</div>
+                </div>
+            </div>
+            <div class="kpi-subtitle">Action completeness</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
     st.markdown(
         """
@@ -1469,13 +1487,13 @@ st.markdown(
     }
     .hero-shell h1 {
         margin: 0;
-        font-size: 2.15rem;
+        font-size: 2.05rem;
         line-height: 1.1;
-        letter-spacing: 0.03em;
+        letter-spacing: 0.01em;
         color: #ffffff !important;
         text-align: left;
-        font-weight: 700;
-        font-family: "Georgia", "Palatino Linotype", serif;
+        font-weight: 800;
+        font-family: "Trebuchet MS", "Segoe UI", "Verdana", sans-serif;
         text-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
         position: relative;
         z-index: 1;
@@ -1490,13 +1508,14 @@ st.markdown(
         z-index: 1;
     }
     .stTabs {
-        margin-top: 0.45rem;
+        margin-top: 0.2rem;
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 0.35rem;
         background: #eef2ff;
         padding: 0.35rem;
         border-radius: 999px;
+        justify-content: flex-start;
     }
     .stTabs [data-baseweb="tab"] {
         font-weight: 700;
@@ -1864,6 +1883,40 @@ st.markdown(
         font-weight: 700;
         text-decoration: none;
     }
+    .completion-card {
+        background: #ffffff;
+        border: 1px solid #d9e2ec;
+        border-radius: 16px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+        padding: 1rem 1.05rem;
+        min-height: 108px;
+    }
+    .completion-wrap {
+        display: flex;
+        justify-content: center;
+        padding: 0.2rem 0 0.35rem;
+    }
+    .completion-ring {
+        --size: 88px;
+        width: var(--size);
+        height: var(--size);
+        border-radius: 50%;
+        background: conic-gradient(#d9ff57 calc(var(--pct) * 1%), #eef2f7 0);
+        display: grid;
+        place-items: center;
+        box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05);
+    }
+    .completion-inner {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: #ffffff;
+        display: grid;
+        place-items: center;
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: #4f46e5;
+    }
     @media (max-width: 980px) {
         .dashboard-shell {
             grid-template-columns: 1fr;
@@ -1909,7 +1962,7 @@ seed_default_departments()
 st.markdown(
     """
     <div class="hero-shell">
-        <h1>AI-Powered Meeting Insight Generator and Action Tracker</h1>
+        <h1>MeetIQ's Sparkly Meeting Hub</h1>
         <p>Made for Talentcorp by 1 &lt;3</p>
     </div>
     """,
@@ -2230,18 +2283,6 @@ with tabs[0]:
     open_count = int(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])) if not action_df.empty else 0
     completion_pct = round((done_count / len(action_df)) * 100) if not action_df.empty and len(action_df) else 0
 
-    st.markdown(
-        """
-        <div class="search-shell">
-            <div class="search-icon">⌕</div>
-            <div>
-                <div class="dashboard-title" style="font-size:1.15rem;margin:0;">Search Meetings</div>
-                <p class="dashboard-copy">Find by event name, meeting ID, or group name and view the summary with tasks in one place.</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     dashboard_search = st.text_input(
         "Search meetings",
         placeholder="Search event name, ID, or group name...",
@@ -2262,7 +2303,7 @@ with tabs[0]:
             with c3:
                 render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
             with c4:
-                render_kpi_card("Completion", f"{completion_pct}%", "Action completeness", "#4f46e5")
+                render_completion_ring(completion_pct)
 
         if not meeting_df.empty:
             year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
