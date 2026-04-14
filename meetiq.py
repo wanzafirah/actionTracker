@@ -726,6 +726,36 @@ def compact_transcript_for_prompt(text: str, max_chars: int = 1200) -> str:
     return compacted[:max_chars] if compacted else text[:max_chars]
 
 
+def transcript_sentences(text: str) -> list:
+    raw_sentences = re.split(r"(?<=[.!?])\s+|\n+", text)
+    return [sentence.strip(" -•\t") for sentence in raw_sentences if sentence and sentence.strip()]
+
+
+def fallback_discussion_points(text: str, limit: int = 4) -> list:
+    points = []
+    for sentence in transcript_sentences(text):
+        lowered = sentence.lower()
+        if any(token in lowered for token in ("discuss", "review", "share", "explore", "align", "overview", "about")):
+            points.append(sentence)
+        elif len(points) < limit and len(sentence.split()) >= 6:
+            points.append(sentence)
+        if len(points) >= limit:
+            break
+    return points[:limit]
+
+
+def fallback_key_decisions(text: str, limit: int = 3) -> list:
+    decisions = []
+    markers = ("decided", "agreed", "approved", "confirmed", "will proceed", "it was decided", "the team agreed")
+    for sentence in transcript_sentences(text):
+        lowered = sentence.lower()
+        if any(marker in lowered for marker in markers):
+            decisions.append(sentence)
+        if len(decisions) >= limit:
+            break
+    return decisions[:limit]
+
+
 def is_objective_only_transcript(text: str) -> bool:
     lower = " ".join(text.lower().split())
     objective_markers = [
@@ -1325,6 +1355,9 @@ Rules:
 - Do not infer hidden or implied tasks from general discussion or meeting purpose.
 - Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another company, do not place it in action_items.
 - External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
+- Always return at least 1-3 discussion_points when the transcript contains actual meeting content.
+- discussion_points should capture the main topics discussed, reviewed, aligned, explored, or presented.
+- Return key_decisions only when the transcript clearly states a decision, agreement, confirmation, or approval.
 - If a recap includes important dates, months, launch periods, deadlines, or timelines, include them only when they are explicitly mentioned.
 - If owner or deadline is missing, use "Not stated" and "None".
 - Prefer separate action items instead of merging unrelated tasks, but only when each task is explicitly stated.
@@ -1424,11 +1457,19 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         result["classification"]["action_items_count"] = 0
         result["classification"]["decisions_count"] = len(result.get("key_decisions", []))
         result["classification"]["discussion_points_count"] = len(result.get("discussion_points", []))
+
+    if not result.get("discussion_points"):
+        result["discussion_points"] = fallback_discussion_points(cleaned_transcript)
+    if not result.get("key_decisions"):
+        result["key_decisions"] = fallback_key_decisions(cleaned_transcript)
+
     result["follow_up_reason"] = ""
     filtered_actions = filter_talentcorp_actions(result.get("action_items", []))
     result["action_items"] = filtered_actions
     result.setdefault("classification", {})
     result["classification"]["action_items_count"] = len(filtered_actions)
+    result["classification"]["decisions_count"] = len(result.get("key_decisions", []))
+    result["classification"]["discussion_points_count"] = len(result.get("discussion_points", []))
     if not filtered_actions:
         result["follow_up"] = False
     return result
@@ -2224,12 +2265,13 @@ if st.session_state.current_page == "Capture":
         with action_col_left:
             run_clicked = st.button(
                 "Generate Summary",
+                key="capture_generate_btn",
                 type="primary",
                 use_container_width=True,
                 disabled=not transcript.strip(),
             )
         with action_col_right:
-            st.button("Clear Input", on_click=clear_capture_inputs, use_container_width=True)
+            st.button("Clear Input", key="capture_clear_btn", on_click=clear_capture_inputs, use_container_width=True)
 
     resolved_activity_id = st.session_state.capture_activity_id.strip() or generate_activity_id(
         activity_category or activity_type or "ACT",
