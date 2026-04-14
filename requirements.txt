@@ -7,4 +7,4 @@ pypdf
 python-docx
 openai-whisper
 torch
-ffmpeg
+
