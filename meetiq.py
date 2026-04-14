@@ -2420,14 +2420,6 @@ with st.sidebar:
         args=("Dashboard",),
     )
     st.button(
-        "Productivity",
-        key="nav_productivity",
-        use_container_width=True,
-        type="primary" if st.session_state.current_page == "Productivity" else "secondary",
-        on_click=set_current_page,
-        args=("Productivity",),
-    )
-    st.button(
         "Capture",
         key="nav_capture",
         use_container_width=True,
@@ -2450,6 +2442,14 @@ with st.sidebar:
         type="primary" if st.session_state.current_page == "Finance" else "secondary",
         on_click=set_current_page,
         args=("Finance",),
+    )
+    st.button(
+        "Productivity",
+        key="nav_productivity",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Productivity" else "secondary",
+        on_click=set_current_page,
+        args=("Productivity",),
     )
 
 
