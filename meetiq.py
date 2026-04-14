@@ -992,11 +992,11 @@ def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
     )
 
 
-def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str) -> None:
+def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str, key: str) -> None:
     href = f"?page={page}&focus={focus}"
     st.markdown(
         f"""
-        <a class="card-link" href="{href}">
+        <a class="card-link" href="{href}" target="_self">
             <div class="kpi-card clickable-card">
                 <div class="kpi-label">{title}</div>
                 <div class="kpi-value" style="color:{accent}">{value}</div>
@@ -1026,12 +1026,12 @@ def render_completion_ring(percent: int) -> None:
     )
 
 
-def render_completion_link_ring(percent: int, page: str, focus: str) -> None:
+def render_completion_link_ring(percent: int, page: str, focus: str, key: str) -> None:
     safe_percent = max(0, min(int(percent), 100))
     href = f"?page={page}&focus={focus}"
     st.markdown(
         f"""
-        <a class="card-link" href="{href}">
+        <a class="card-link" href="{href}" target="_self">
             <div class="completion-card clickable-card">
                 <div class="kpi-label">Completion</div>
                 <div class="completion-wrap">
@@ -1212,6 +1212,8 @@ def search_meetings(meetings: list, query: str) -> list:
 def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
     dated_meetings = []
     for meeting in meetings:
+        if not meeting.get("actions"):
+            continue
         try:
             meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
             dated_meetings.append((meeting_date, meeting))
@@ -1477,7 +1479,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
 
 def chat_with_meetings(question: str, meetings: list) -> str:
     meeting_blocks = []
-    for meeting in meetings[:10]:
+    for meeting in meetings[:5]:
         actions = meeting.get("actions", [])
         action_lines = [
             f"- {normalize_value(action.get('text'))} | owner: {normalize_value(action.get('owner'), 'Not stated')} | "
@@ -1489,7 +1491,6 @@ def chat_with_meetings(question: str, meetings: list) -> str:
                 [
                     f"Date: {meeting['date']}",
                     f"Title: {meeting['title']}",
-                    f"Summary: {meeting.get('summary', '')}",
                     f"Outcome: {meeting.get('outcome', '')}",
                     f"Follow-up: {meeting.get('followUp', False)}",
                     "Action items:",
@@ -1513,7 +1514,7 @@ RULES:
 - Be concise, practical, and business-friendly.
 """
     user_msg = f"Meeting data:\n{ctx}\n\nQuestion: {question}"
-    return call_ollama(system, user_msg, max_tokens=400)
+    return call_ollama(system, user_msg, max_tokens=220)
 
 
 # ============================================================
@@ -1638,9 +1639,17 @@ st.markdown(
         color: #ffffff !important;
         backdrop-filter: blur(4px);
     }
+    [data-testid="stFileUploader"] button,
+    [data-testid="stFileUploader"] button span,
+    [data-testid="stFileUploader"] section button,
+    [data-testid="stFileUploaderDropzone"] button,
+    [data-testid="stFileUploaderDropzone"] button span {
+        color: #ffffff !important;
+    }
     .card-link {
         text-decoration: none !important;
         display: block;
+        color: inherit !important;
     }
     .clickable-card {
         cursor: pointer;
@@ -2460,11 +2469,11 @@ if st.session_state.current_page == "Dashboard":
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_link_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706", "Tracker", "open")
+                render_kpi_link_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706", "Tracker", "open", "open_tasks_card")
             with c3:
-                render_kpi_link_card("Done", str(done_count), "Completed actions", "#16a34a", "Tracker", "done")
+                render_kpi_link_card("Done", str(done_count), "Completed actions", "#16a34a", "Tracker", "done", "done_tasks_card")
             with c4:
-                render_completion_link_ring(completion_pct, "Tracker", "done")
+                render_completion_link_ring(completion_pct, "Tracker", "done", "completion_card")
 
         if not meeting_df.empty:
             year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
@@ -2509,18 +2518,23 @@ if st.session_state.current_page == "Dashboard":
                     style_plotly(fig_overview, height=320)
                     st.plotly_chart(fig_overview, use_container_width=True)
                 with type_col:
+                    month_options = ["All Months"] + sorted(year_df["month_label"].dropna().unique().tolist(), key=lambda m: list(calendar.month_abbr).index(m) if m in list(calendar.month_abbr) else 99)
+                    selected_month = st.selectbox("Meeting Type Month", month_options, key="dashboard_type_month_filter")
+                    type_source = year_df.copy()
+                    if selected_month != "All Months":
+                        type_source = type_source[type_source["month_label"] == selected_month]
                     type_rollup = (
-                        year_df.groupby(["month_num", "month_label", "type"], as_index=False).size().rename(columns={"size": "count"}).sort_values("month_num")
-                        if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "type", "count"])
+                        type_source.groupby(["type"], as_index=False).size().rename(columns={"size": "count"})
+                        if not type_source.empty else pd.DataFrame(columns=["type", "count"])
                     )
-                    fig_type = px.bar(
+                    fig_type = px.pie(
                         type_rollup,
-                        x="month_label",
-                        y="count",
+                        names="type",
+                        values="count",
+                        title=f"Meeting Type ({selected_month if selected_month != 'All Months' else selected_year})",
                         color="type",
-                        title=f"Meeting Type ({selected_year})",
-                        barmode="group",
-                        color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8"],
+                        color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8", "#d97706"],
+                        hole=0.45,
                     )
                     style_plotly(fig_type, height=320)
                     st.plotly_chart(fig_type, use_container_width=True)
@@ -2529,13 +2543,13 @@ if st.session_state.current_page == "Dashboard":
                     year_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"].sum().sort_values("month_num")
                     if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "department", "cost"])
                 )
-                fig_spend = px.bar(
+                fig_spend = px.line(
                     spend_rollup,
                     x="month_label",
                     y="cost",
                     color="department",
-                    barmode="group",
                     title=f"Monthly Budget Spend by Department ({selected_year})",
+                    markers=True,
                     color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
                 )
                 style_plotly(fig_spend, height=340)
@@ -2711,13 +2725,13 @@ if st.session_state.current_page == "Finance":
                 .sum()
                 .sort_values("month_num")
             )
-            fig_dept = px.bar(
+            fig_dept = px.line(
                 dept_rollup,
                 x="month_label",
                 y="cost",
                 title=f"Monthly Spend by Department ({finance_year})",
                 color="department",
-                barmode="group",
+                markers=True,
                 color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
             )
             style_plotly(fig_dept)
