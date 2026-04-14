@@ -169,6 +169,10 @@ def clear_generated_activity_id():
     st.session_state.capture_activity_id = ""
 
 
+def set_current_page(page_name: str):
+    st.session_state.current_page = page_name
+
+
 def clear_capture_inputs():
     st.session_state.pending_result = None
     st.session_state.capture_transcript = ""
@@ -1456,77 +1460,83 @@ st.markdown(
         box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
     }
     .hero-shell {
-        background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 42%, #4f46e5 100%);
-        color: white;
-        border-radius: 24px;
-        padding: 1.45rem 1.8rem 1.35rem;
-        margin-bottom: 1.15rem;
-        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+        background:
+            linear-gradient(to right, rgba(242, 71, 44, 0.98), rgba(242, 71, 44, 0.98)),
+            linear-gradient(#f3d4cd 1px, transparent 1px),
+            linear-gradient(90deg, #f3d4cd 1px, transparent 1px);
+        background-size: auto, 92px 92px, 92px 92px;
+        background-position: center, center, center;
+        color: #f8f1e4;
+        border-radius: 28px;
+        padding: 1.3rem 1.6rem 1.4rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 18px 36px rgba(242, 71, 44, 0.18);
         position: relative;
         overflow: hidden;
+        border: 4px solid #f7eee1;
     }
     .hero-shell::before {
         content: "";
         position: absolute;
-        top: -30px;
-        right: 22%;
-        width: 120px;
-        height: 120px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.10);
-        filter: blur(2px);
-    }
-    .hero-shell::after {
-        content: "";
-        position: absolute;
-        inset: auto -40px -40px auto;
-        width: 180px;
-        height: 180px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.08);
+        inset: 24px;
+        border: 2px solid rgba(248, 241, 228, 0.6);
+        border-radius: 24px;
     }
     .hero-shell h1 {
         margin: 0;
         font-size: 2.05rem;
-        line-height: 1.1;
-        letter-spacing: 0.01em;
-        color: #ffffff !important;
+        line-height: 1.06;
+        letter-spacing: 0.02em;
+        color: #fff6ea !important;
         text-align: left;
-        font-weight: 800;
-        font-family: "Trebuchet MS", "Segoe UI", "Verdana", sans-serif;
-        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+        font-weight: 900;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        text-transform: uppercase;
         position: relative;
         z-index: 1;
+        max-width: 54rem;
     }
     .hero-shell p {
-        margin: 0.35rem 0 0;
-        color: rgba(255,255,255,0.92);
-        max-width: 56rem;
+        margin: 0.55rem 0 0;
+        color: #fff4ea;
+        max-width: 42rem;
         text-align: left;
-        font-size: 0.98rem;
+        font-size: 1rem;
         position: relative;
         z-index: 1;
-    }
-    .stTabs {
-        margin-top: 0.2rem;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.35rem;
-        background: #eef2ff;
-        padding: 0.35rem;
-        border-radius: 999px;
-        justify-content: flex-start;
-    }
-    .stTabs [data-baseweb="tab"] {
         font-weight: 700;
-        color: var(--text-soft) !important;
-        border-radius: 999px;
-        padding: 0.55rem 1rem;
-        background: transparent;
     }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        color: #ffffff !important;
-        background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    .app-shell {
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr);
+        gap: 1rem;
+        align-items: start;
+    }
+    .side-nav {
+        background: rgba(255,255,255,0.88);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.07);
+        padding: 1rem 0.75rem;
+        position: sticky;
+        top: 1rem;
+    }
+    .side-nav-title {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: var(--text);
+        margin: 0 0 0.15rem;
+    }
+    .side-nav-copy {
+        color: var(--text-soft);
+        font-size: 0.88rem;
+        margin: 0 0 0.9rem;
+    }
+    .nav-button {
+        margin-bottom: 0.55rem;
+    }
+    .page-shell {
+        min-width: 0;
     }
     h2, h3, label, .stMarkdown, .stCaption, .stRadio label, .stSelectbox label {
         color: var(--text) !important;
@@ -1921,6 +1931,9 @@ st.markdown(
         .dashboard-shell {
             grid-template-columns: 1fr;
         }
+        .app-shell {
+            grid-template-columns: 1fr;
+        }
     }
     div[data-baseweb="input"], div[data-baseweb="select"], textarea, input {
         color: var(--text) !important;
@@ -1954,6 +1967,8 @@ def init_state():
         st.session_state.capture_transcript = ""
     if "capture_activity_id" not in st.session_state:
         st.session_state.capture_activity_id = ""
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "Dashboard"
 
 
 init_state()
@@ -1962,8 +1977,8 @@ seed_default_departments()
 st.markdown(
     """
     <div class="hero-shell">
-        <h1>MeetIQ's Sparkly Meeting Hub</h1>
-        <p>Made for Talentcorp by 1 &lt;3</p>
+        <h1>AI-Powered Meeting Insight Generator &amp; Action Tracker</h1>
+        <p>for Talentcorp by z</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1973,14 +1988,59 @@ meetings = st.session_state.meetings
 meeting_df = build_meeting_dataframe(meetings)
 action_df = build_action_dataframe(meetings)
 
-tabs = st.tabs(["Dashboard", "Capture", "Tracker", "Finance"])
+st.markdown('<div class="app-shell">', unsafe_allow_html=True)
+nav_col, page_col = st.columns([0.2, 0.8])
+with nav_col:
+    st.markdown(
+        """
+        <div class="side-nav">
+            <div class="side-nav-title">MeetIQ</div>
+            <div class="side-nav-copy">Pick a workspace area.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.button(
+        "Dashboard",
+        key="nav_dashboard",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Dashboard" else "secondary",
+        on_click=set_current_page,
+        args=("Dashboard",),
+    )
+    st.button(
+        "Capture",
+        key="nav_capture",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Capture" else "secondary",
+        on_click=set_current_page,
+        args=("Capture",),
+    )
+    st.button(
+        "Tracker",
+        key="nav_tracker",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Tracker" else "secondary",
+        on_click=set_current_page,
+        args=("Tracker",),
+    )
+    st.button(
+        "Finance",
+        key="nav_finance",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Finance" else "secondary",
+        on_click=set_current_page,
+        args=("Finance",),
+    )
+with page_col:
+    st.markdown('<div class="page-shell">', unsafe_allow_html=True)
 
 
 # ============================================================
 # Section 7. Capture Tab
 # ============================================================
 
-with tabs[1]:
+if st.session_state.current_page == "Capture":
     st.subheader("Capture & Analyze")
     st.caption("Paste notes, upload audio, or record a meeting to generate a structured executive brief.")
 
@@ -2272,7 +2332,7 @@ with tabs[1]:
 # Section 8. Dashboard Tab
 # ============================================================
 
-with tabs[0]:
+if st.session_state.current_page == "Dashboard":
     st.subheader("Dashboard")
 
     dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
@@ -2439,7 +2499,7 @@ with tabs[0]:
 # Section 9. Action Tracker Tab
 # ============================================================
 
-with tabs[2]:
+if st.session_state.current_page == "Tracker":
     st.subheader("Action Tracker")
 
     if action_df.empty:
@@ -2492,7 +2552,7 @@ with tabs[2]:
 # Section 10. Finance Tab
 # ============================================================
 
-with tabs[3]:
+if st.session_state.current_page == "Finance":
     st.subheader("Finance Tracker")
 
     total_spend = float(meeting_df["cost"].sum()) if not meeting_df.empty else 0
@@ -2572,3 +2632,7 @@ with tabs[3]:
             unsafe_allow_html=True,
         )
         st.progress(pct / 100 if budget else 0)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
