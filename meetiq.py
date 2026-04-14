@@ -2764,7 +2764,7 @@ if st.session_state.current_page == "Dashboard":
     with dashboard_left:
         overview_card = st.container(border=True)
         with overview_card:
-            st.markdown("### Today at a Glance")
+            st.markdown("### Today’s Brief")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
@@ -2774,6 +2774,29 @@ if st.session_state.current_page == "Dashboard":
                 render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
             with c4:
                 render_completion_ring(completion_pct)
+
+        upcoming_card = st.container(border=True)
+        with upcoming_card:
+            st.markdown("### Upcoming Project")
+            upcoming_meetings = get_upcoming_meetings(meetings)
+            if not upcoming_meetings:
+                st.info("No upcoming projects yet.")
+            else:
+                for meeting in upcoming_meetings:
+                    st.markdown(
+                        f"""
+                        <div class="upcoming-item">
+                            <div class="upcoming-top">
+                                <div>
+                                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled')}</div>
+                                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
+                                </div>
+                                <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
     with dashboard_right:
         calendar_card = st.container(border=True)
@@ -2811,29 +2834,6 @@ if st.session_state.current_page == "Dashboard":
                 unsafe_allow_html=True,
             )
             st.caption("Yellow dates show pending action deadlines.")
-
-        upcoming_card = st.container(border=True)
-        with upcoming_card:
-            st.markdown("### Upcoming Project")
-            upcoming_meetings = get_upcoming_meetings(meetings)
-            if not upcoming_meetings:
-                st.info("No upcoming projects yet.")
-            else:
-                for meeting in upcoming_meetings:
-                    st.markdown(
-                        f"""
-                        <div class="upcoming-item">
-                            <div class="upcoming-top">
-                                <div>
-                                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled')}</div>
-                                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
-                                </div>
-                                <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
 
         assistant_card = st.container(border=True)
         with assistant_card:
