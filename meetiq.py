@@ -3,6 +3,7 @@ import html
 import os
 import re
 import tempfile
+import calendar
 from datetime import date, datetime
 from uuid import uuid4
 
@@ -1077,6 +1078,128 @@ def add_month_columns(df: pd.DataFrame, date_column: str) -> pd.DataFrame:
     return output
 
 
+def search_meetings(meetings: list, query: str) -> list:
+    needle = query.strip().lower()
+    if not needle:
+        return meetings[:6]
+
+    matches = []
+    for meeting in meetings:
+        haystack_parts = [
+            meeting.get("title", ""),
+            meeting.get("summary", ""),
+            meeting.get("meetingID", ""),
+            meeting.get("activityId", ""),
+            meeting.get("deptName", ""),
+            meeting.get("department", ""),
+            meeting.get("sltdepartment", ""),
+            join_list(meeting.get("stakeholders", []), ""),
+            join_list(meeting.get("companies", []), ""),
+        ]
+        haystack = " ".join(haystack_parts).lower()
+        if needle in haystack:
+            matches.append(meeting)
+    return matches
+
+
+def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
+    dated_meetings = []
+    for meeting in meetings:
+        try:
+            meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
+            dated_meetings.append((meeting_date, meeting))
+        except Exception:
+            continue
+
+    upcoming = [item for item in dated_meetings if item[0] >= date.today()]
+    selected = sorted(upcoming, key=lambda item: item[0])[:limit]
+    if not selected:
+        selected = sorted(dated_meetings, key=lambda item: item[0], reverse=True)[:limit]
+    return [meeting for _, meeting in selected]
+
+
+def build_calendar_html(meetings: list, year: int, month: int) -> str:
+    cal = calendar.Calendar(firstweekday=0)
+    meeting_days = set()
+    for meeting in meetings:
+        try:
+            parsed = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if parsed.year == year and parsed.month == month:
+            meeting_days.add(parsed.day)
+
+    weeks = cal.monthdayscalendar(year, month)
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    header = "".join(f"<div class='calendar-day-label'>{label}</div>" for label in day_labels)
+    cells = []
+    today = date.today()
+    for week in weeks:
+        for day_num in week:
+            classes = ["calendar-day"]
+            label = "" if day_num == 0 else str(day_num)
+            if day_num == today.day and month == today.month and year == today.year:
+                classes.append("today")
+            if day_num in meeting_days:
+                classes.append("has-event")
+            if day_num == 0:
+                classes.append("empty")
+            cells.append(f"<div class='{' '.join(classes)}'>{label}</div>")
+
+    return f"""
+    <div class="calendar-widget">
+        <div class="calendar-grid calendar-head">{header}</div>
+        <div class="calendar-grid">{''.join(cells)}</div>
+    </div>
+    """
+
+
+def render_search_result_card(meeting: dict) -> None:
+    st.markdown(
+        f"""
+        <div class="search-result-card">
+            <div class="search-result-top">
+                <div>
+                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled meeting')}</div>
+                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')} | {normalize_value(meeting.get('date'), 'No date')}</div>
+                </div>
+                <div class="result-pill">{'Yes' if meeting.get('followUp') else 'No'} follow-up</div>
+            </div>
+            <div class="mini-copy">{normalize_value(meeting.get('summary'), 'No summary available.')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    actions = meeting.get("actions", [])
+    if actions:
+        st.markdown("**Tasks**")
+        for action in actions:
+            render_action_card(action)
+
+
+def render_dashboard_chat(meetings: list) -> None:
+    st.markdown('<div class="chat-thread dashboard-chat-thread">', unsafe_allow_html=True)
+    if st.session_state.chat_history:
+        for message in st.session_state.chat_history[-4:]:
+            render_chat_bubble(message["role"], message["text"])
+    else:
+        render_chat_bubble("assistant", "Ask about meetings, tasks, deadlines, or next steps.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.form("dashboard_chat_form", clear_on_submit=True):
+        question = st.text_input("Ask AI", placeholder="Ask about a meeting or task...", label_visibility="collapsed")
+        submitted = st.form_submit_button("Send", use_container_width=True)
+
+    if submitted and question.strip():
+        st.session_state.chat_history.append({"role": "user", "text": question})
+        try:
+            answer = chat_with_meetings(question, meetings)
+        except Exception as exc:
+            answer = f"Error: {exc}"
+        st.session_state.chat_history.append({"role": "assistant", "text": answer})
+        st.rerun()
+
+
 # ============================================================
 # Section 5. Meeting Analysis Prompt
 # ============================================================
@@ -1594,6 +1717,158 @@ st.markdown(
         font-weight: 700;
         border: 1px solid #c6d4e3;
     }
+    .dashboard-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(310px, 0.85fr);
+        gap: 1rem;
+        align-items: start;
+    }
+    .dashboard-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    .dashboard-card {
+        background: rgba(255,255,255,0.94);
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+        padding: 1rem 1.05rem;
+    }
+    .dashboard-title {
+        font-size: 1.55rem;
+        font-weight: 800;
+        color: var(--text);
+        margin: 0 0 0.2rem;
+    }
+    .dashboard-copy {
+        color: var(--text-soft);
+        font-size: 0.96rem;
+        margin: 0;
+    }
+    .search-shell {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        background: #f8fbff;
+        border: 1px solid #d8e2f1;
+        border-radius: 18px;
+        padding: 0.55rem 0.85rem;
+        margin-bottom: 1rem;
+    }
+    .search-icon {
+        width: 2.6rem;
+        height: 2.6rem;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, var(--brand), var(--brand-2));
+        color: #fff;
+        font-size: 1.1rem;
+        flex: 0 0 auto;
+    }
+    .calendar-widget {
+        margin-top: 0.6rem;
+    }
+    .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 0.42rem;
+    }
+    .calendar-head {
+        margin-bottom: 0.45rem;
+    }
+    .calendar-day-label {
+        text-align: center;
+        color: var(--text-soft);
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .calendar-day {
+        aspect-ratio: 1 / 1;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        background: #f3f6fb;
+        color: var(--text);
+        font-weight: 700;
+        border: 1px solid #e2e8f0;
+    }
+    .calendar-day.empty {
+        background: transparent;
+        border-color: transparent;
+    }
+    .calendar-day.today {
+        background: #1e3a5f;
+        color: #ffffff;
+    }
+    .calendar-day.has-event {
+        box-shadow: inset 0 0 0 2px #4f46e5;
+        color: #312e81;
+    }
+    .upcoming-item {
+        padding: 0.85rem 0.95rem;
+        border-radius: 16px;
+        background: #f8fbff;
+        border: 1px solid #d8e2f1;
+        margin-top: 0.7rem;
+    }
+    .upcoming-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        align-items: start;
+    }
+    .upcoming-date {
+        min-width: 74px;
+        padding: 0.45rem 0.55rem;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #e0e7ff, #dbeafe);
+        color: #1e3a5f;
+        text-align: center;
+        font-weight: 800;
+        font-size: 0.82rem;
+    }
+    .search-result-card {
+        padding: 0.95rem 1rem;
+        border-radius: 18px;
+        background: #ffffff;
+        border: 1px solid #dbe4f0;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        margin-bottom: 0.85rem;
+    }
+    .search-result-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        gap: 0.85rem;
+        margin-bottom: 0.45rem;
+    }
+    .result-pill {
+        white-space: nowrap;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #3730a3;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+    .dashboard-chat-thread .chat-bubble {
+        max-width: 100%;
+        font-size: 0.92rem;
+    }
+    .section-link {
+        color: #4f46e5;
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-decoration: none;
+    }
+    @media (max-width: 980px) {
+        .dashboard-shell {
+            grid-template-columns: 1fr;
+        }
+    }
     div[data-baseweb="input"], div[data-baseweb="select"], textarea, input {
         color: var(--text) !important;
         font-size: 1rem !important;
@@ -1641,14 +1916,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tabs = st.tabs(["Capture", "Library", "Tracker", "Finance", "Chat", "Dashboard"])
+meetings = st.session_state.meetings
+meeting_df = build_meeting_dataframe(meetings)
+action_df = build_action_dataframe(meetings)
+
+tabs = st.tabs(["Dashboard", "Capture", "Tracker", "Finance"])
 
 
 # ============================================================
 # Section 7. Capture Tab
 # ============================================================
 
-with tabs[0]:
+with tabs[1]:
     st.subheader("Capture & Analyze")
     st.caption("Paste notes, upload audio, or record a meeting to generate a structured executive brief.")
 
@@ -1927,7 +2206,7 @@ with tabs[0]:
         with st.expander("Prepare Email Copy"):
             render_email_copy_block(email_preview_meeting, "preview_email_copy")
 
-        if st.button("Save to Library", type="primary"):
+        if st.button("Save Record", type="primary"):
             new_meeting = build_meeting_record(result, pending)
             st.session_state.meetings.insert(0, new_meeting)
             persist_app_data()
@@ -1937,88 +2216,182 @@ with tabs[0]:
 
 
 # ============================================================
-# Section 8. Meeting Library Tab
+# Section 8. Dashboard Tab
 # ============================================================
 
-with tabs[1]:
-    st.subheader("Meeting Library")
-    meetings = st.session_state.meetings
-    st.caption(f"{len(meetings)} meeting{'s' if len(meetings) != 1 else ''} stored")
+with tabs[0]:
+    st.subheader("Dashboard")
 
-    if not meetings:
-        st.info("No meetings yet. Capture one to get started.")
-    else:
-        search = st.text_input("Search meetings", "")
-        filtered = filter_meeting_library(meetings, search)
+    dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
+    selected_year = st.selectbox("Dashboard Year", dashboard_years, key="dashboard_year_filter")
 
-        for meeting in filtered:
-            actions = meeting.get("actions", [])
-            done = sum(1 for action in actions if normalize_status(action) == "Done")
-            header = f"{meeting['title']} | {meeting['date']} | {meeting['type']}"
-            with st.expander(header):
-                top_left, top_right = st.columns([1.4, 0.6])
-                with top_left:
+    done_count = int((action_df["status"] == "Done").sum()) if not action_df.empty else 0
+    overdue_count = int((action_df["status"] == "Overdue").sum()) if not action_df.empty else 0
+    open_count = int(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])) if not action_df.empty else 0
+    completion_pct = round((done_count / len(action_df)) * 100) if not action_df.empty and len(action_df) else 0
+
+    st.markdown(
+        """
+        <div class="search-shell">
+            <div class="search-icon">⌕</div>
+            <div>
+                <div class="dashboard-title" style="font-size:1.15rem;margin:0;">Search Meetings</div>
+                <p class="dashboard-copy">Find by event name, meeting ID, or group name and view the summary with tasks in one place.</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    dashboard_search = st.text_input(
+        "Search meetings",
+        placeholder="Search event name, ID, or group name...",
+        label_visibility="collapsed",
+        key="dashboard_search",
+    )
+
+    dashboard_left, dashboard_right = st.columns([1.35, 0.85])
+    with dashboard_left:
+        overview_card = st.container(border=True)
+        with overview_card:
+            st.markdown("### Today at a Glance")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
+            with c2:
+                render_kpi_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706")
+            with c3:
+                render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
+            with c4:
+                render_kpi_card("Completion", f"{completion_pct}%", "Action completeness", "#4f46e5")
+
+        if not meeting_df.empty:
+            year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
+            year_actions_df = add_month_columns(
+                action_df[action_df["meeting_date"].astype(str).str.startswith(str(selected_year))].copy() if not action_df.empty else pd.DataFrame(),
+                "meeting_date",
+            )
+            insights_card = st.container(border=True)
+            with insights_card:
+                st.markdown("### Dashboard Insights")
+                overview_col, type_col = st.columns(2)
+                with overview_col:
+                    meetings_monthly = (
+                        year_df.groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                        if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+                    )
+                    done_monthly = (
+                        year_actions_df[year_actions_df["status"] == "Done"].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                        if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+                    )
+                    overdue_monthly = (
+                        year_actions_df[year_actions_df["status"] == "Overdue"].groupby(["month_num", "month_label"], as_index=False).size().rename(columns={"size": "count"})
+                        if not year_actions_df.empty else pd.DataFrame(columns=["month_num", "month_label", "count"])
+                    )
+                    overview_df = pd.concat(
+                        [
+                            meetings_monthly.assign(metric="Meetings"),
+                            done_monthly.assign(metric="Done"),
+                            overdue_monthly.assign(metric="Overdue"),
+                        ],
+                        ignore_index=True,
+                    ).sort_values("month_num")
+                    fig_overview = px.bar(
+                        overview_df,
+                        x="month_label",
+                        y="count",
+                        color="metric",
+                        title=f"Monthly Activity ({selected_year})",
+                        barmode="group",
+                        color_discrete_map={"Meetings": "#1e3a5f", "Done": "#16a34a", "Overdue": "#dc2626"},
+                    )
+                    style_plotly(fig_overview, height=320)
+                    st.plotly_chart(fig_overview, use_container_width=True)
+                with type_col:
+                    type_rollup = (
+                        year_df.groupby(["month_num", "month_label", "type"], as_index=False).size().rename(columns={"size": "count"}).sort_values("month_num")
+                        if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "type", "count"])
+                    )
+                    fig_type = px.bar(
+                        type_rollup,
+                        x="month_label",
+                        y="count",
+                        color="type",
+                        title=f"Meeting Type ({selected_year})",
+                        barmode="group",
+                        color_discrete_sequence=["#4f46e5", "#0f766e", "#94a3b8"],
+                    )
+                    style_plotly(fig_type, height=320)
+                    st.plotly_chart(fig_type, use_container_width=True)
+
+                spend_rollup = (
+                    year_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"].sum().sort_values("month_num")
+                    if not year_df.empty else pd.DataFrame(columns=["month_num", "month_label", "department", "cost"])
+                )
+                fig_spend = px.bar(
+                    spend_rollup,
+                    x="month_label",
+                    y="cost",
+                    color="department",
+                    barmode="group",
+                    title=f"Monthly Budget Spend by Department ({selected_year})",
+                    color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
+                )
+                style_plotly(fig_spend, height=340)
+                st.plotly_chart(fig_spend, use_container_width=True)
+
+        results_card = st.container(border=True)
+        with results_card:
+            st.markdown("### Search Results")
+            if not meetings:
+                st.info("No meetings stored yet. Capture one to start building the dashboard.")
+            else:
+                matched_meetings = search_meetings(meetings, dashboard_search)
+                if not matched_meetings:
+                    st.info("No matching meetings found.")
+                else:
+                    for meeting in matched_meetings[:5]:
+                        render_search_result_card(meeting)
+
+    with dashboard_right:
+        calendar_card = st.container(border=True)
+        with calendar_card:
+            st.markdown("### Calendar")
+            st.caption(f"{calendar.month_name[date.today().month]} {date.today().year}")
+            st.markdown(build_calendar_html(meetings, date.today().year, date.today().month), unsafe_allow_html=True)
+
+        upcoming_card = st.container(border=True)
+        with upcoming_card:
+            st.markdown("### Upcoming Project")
+            upcoming_meetings = get_upcoming_meetings(meetings)
+            if not upcoming_meetings:
+                st.info("No upcoming projects yet.")
+            else:
+                for meeting in upcoming_meetings:
                     st.markdown(
                         f"""
-                        <div class="info-card">
-                            <div class="mini-title">Summary</div>
-                            <div class="mini-copy">{normalize_value(meeting['summary'])}</div>
+                        <div class="upcoming-item">
+                            <div class="upcoming-top">
+                                <div>
+                                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled')}</div>
+                                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
+                                </div>
+                                <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
+                            </div>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
-                with top_right:
-                    render_kpi_card("Progress", f"{done}/{len(actions)}", "Actions completed", "#1e3a5f")
-                    render_kpi_card("Spend", rm(meeting.get("actualCost", 0)), "Recorded cost", "#0f766e")
 
-                if meeting.get("outcome"):
-                    st.success(meeting["outcome"])
-                if meeting.get("followUp"):
-                    st.markdown("**Follow-up:** Yes")
-
-                meta_left, meta_right = st.columns(2)
-                with meta_left:
-                    st.markdown(
-                        f"""
-                        <div class="info-card">
-                            <div class="mini-title">Stakeholders</div>
-                            <div class="mini-copy">{join_list(meeting.get('stakeholders', []))}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                with meta_right:
-                    st.markdown(
-                        f"""
-                        <div class="info-card">
-                            <div class="mini-title">Organizations</div>
-                            <div class="mini-copy">{join_list(meeting.get('companies', []))}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                if meeting.get("keyDecisions"):
-                    st.markdown("**Key Decisions**")
-                    for decision in meeting["keyDecisions"]:
-                        st.write(normalize_value(decision))
-
-                if actions:
-                    st.markdown("**Action Items**")
-                    for action in actions:
-                        render_action_card(action, editable=True)
-
-                render_email_copy_block(meeting, f"library_email_copy_{meeting['id']}")
-
-                if st.button("Delete Meeting", key=f"del_{meeting['id']}"):
-                    st.session_state.meetings = [item for item in meetings if item["id"] != meeting["id"]]
-                    persist_app_data()
+        assistant_card = st.container(border=True)
+        with assistant_card:
+            st.markdown("### Chatbot")
+            if not meetings:
+                st.info("Save a meeting first to use the assistant.")
+            else:
+                render_dashboard_chat(meetings)
+                if st.button("Clear Chat", key="dashboard_clear_chat", use_container_width=True):
+                    st.session_state.chat_history = []
                     st.rerun()
-
-
-meetings = st.session_state.meetings
-meeting_df = build_meeting_dataframe(meetings)
-action_df = build_action_dataframe(meetings)
 
 
 # ============================================================
@@ -2158,149 +2531,3 @@ with tabs[3]:
             unsafe_allow_html=True,
         )
         st.progress(pct / 100 if budget else 0)
-
-
-# ============================================================
-# Section 11. Chat Tab
-# ============================================================
-
-with tabs[4]:
-    st.subheader("Ask AI")
-
-    if not meetings:
-        st.warning("No meetings stored yet.")
-    else:
-        st.markdown('<div class="chat-thread">', unsafe_allow_html=True)
-        for message in st.session_state.chat_history:
-            render_chat_bubble(message["role"], message["text"])
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        if st.button("Clear Chat"):
-            st.session_state.chat_history = []
-            st.rerun()
-
-        question = st.chat_input("Ask about your meetings...")
-        if question:
-            st.session_state.chat_history.append({"role": "user", "text": question})
-            with st.spinner("Thinking..."):
-                try:
-                    answer = chat_with_meetings(question, meetings)
-                except Exception as exc:
-                    answer = f"Error: {exc}"
-            st.session_state.chat_history.append({"role": "assistant", "text": answer})
-            st.rerun()
-
-
-# ============================================================
-# Section 12. Dashboard Tab
-# ============================================================
-
-with tabs[5]:
-    st.subheader("Dashboard")
-
-    if meeting_df.empty:
-        st.info("No data yet.")
-    else:
-        done_count = int((action_df["status"] == "Done").sum()) if not action_df.empty else 0
-        overdue_count = int((action_df["status"] == "Overdue").sum()) if not action_df.empty else 0
-        total_spend_display = rm(meeting_df["cost"].sum())
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            render_kpi_card("Meetings", str(len(meetings)), "Stored in library", "#0f766e")
-        with c2:
-            render_kpi_card("Actions Done", str(done_count), "Completed tasks", "#16a34a")
-        with c3:
-            render_kpi_card("Overdue", str(overdue_count), "At-risk actions", "#dc2626")
-        with c4:
-            render_kpi_card("Total Spend", total_spend_display, "Recorded spend", "#7c3aed")
-
-        dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True)
-        selected_year = st.selectbox("Dashboard Year", dashboard_years, key="dashboard_year_filter")
-        year_df = add_month_columns(meeting_df[meeting_df["year"] == selected_year].copy(), "date")
-        year_actions_df = add_month_columns(
-            action_df[action_df["meeting_date"].astype(str).str.startswith(str(selected_year))].copy() if not action_df.empty else pd.DataFrame(),
-            "meeting_date",
-        )
-
-        meetings_monthly = (
-            year_df.groupby(["month_num", "month_label"], as_index=False)
-            .size()
-            .rename(columns={"size": "count"})
-        )
-        done_monthly = (
-            year_actions_df[year_actions_df["status"] == "Done"]
-            .groupby(["month_num", "month_label"], as_index=False)
-            .size()
-            .rename(columns={"size": "count"})
-            if not year_actions_df.empty
-            else pd.DataFrame(columns=["month_num", "month_label", "count"])
-        )
-        overdue_monthly = (
-            year_actions_df[year_actions_df["status"] == "Overdue"]
-            .groupby(["month_num", "month_label"], as_index=False)
-            .size()
-            .rename(columns={"size": "count"})
-            if not year_actions_df.empty
-            else pd.DataFrame(columns=["month_num", "month_label", "count"])
-        )
-        overview_df = pd.concat(
-            [
-                meetings_monthly.assign(metric="Total Meetings"),
-                done_monthly.assign(metric="Actions Done"),
-                overdue_monthly.assign(metric="Overdue"),
-            ],
-            ignore_index=True,
-        ).sort_values("month_num")
-        fig_overview = px.bar(
-            overview_df,
-            x="month_label",
-            y="count",
-            title=f"Meeting Overview ({selected_year})",
-            color="metric",
-            color_discrete_map={
-                "Total Meetings": "#1e3a5f",
-                "Actions Done": "#16a34a",
-                "Overdue": "#dc2626",
-            },
-            text="count",
-            barmode="group",
-        )
-        style_plotly(fig_overview)
-        st.plotly_chart(fig_overview, use_container_width=True)
-
-        type_rollup = (
-            year_df.groupby(["month_num", "month_label", "type"], as_index=False)
-            .size()
-            .rename(columns={"size": "count"})
-            .sort_values("month_num")
-        )
-        fig_type = px.bar(
-            type_rollup,
-            x="month_label",
-            y="count",
-            title=f"Meeting Type ({selected_year})",
-            color="type",
-            barmode="group",
-            color_discrete_sequence=["#1e3a5f", "#3b82f6", "#94a3b8"],
-            text="count",
-        )
-        style_plotly(fig_type)
-        st.plotly_chart(fig_type, use_container_width=True)
-
-        monthly_spend = (
-            year_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"]
-            .sum()
-            .sort_values("month_num")
-        )
-        fig_spend = px.bar(
-            monthly_spend,
-            x="month_label",
-            y="cost",
-            color="department",
-            barmode="group",
-            title=f"Monthly Budget Spend by Department ({selected_year})",
-            color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
-        )
-        style_plotly(fig_spend)
-        st.plotly_chart(fig_spend, use_container_width=True)
