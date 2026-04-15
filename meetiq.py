@@ -953,12 +953,28 @@ Return this schema only:
 
 def extract_json(raw: str) -> dict:
     cleaned = re.sub(r"```(?:json)?", "", raw).strip()
+    cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+
+    def try_load(candidate: str) -> dict:
+        return json.loads(candidate)
+
     try:
-        return json.loads(cleaned)
+        return try_load(cleaned)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if match:
-            return json.loads(match.group(0))
+            candidate = match.group(0).strip()
+            repairs = [
+                candidate,
+                re.sub(r",\s*([}\]])", r"\1", candidate),
+                re.sub(r"(?<=[:\[,]\s*)([A-Za-z_][A-Za-z0-9_\-/ ]*)(?=\s*[,}\]])", lambda m: json.dumps(m.group(1).strip()), candidate),
+                re.sub(r",\s*([}\]])", r"\1", re.sub(r"(?<=[:\[,]\s*)([A-Za-z_][A-Za-z0-9_\-/ ]*)(?=\s*[,}\]])", lambda m: json.dumps(m.group(1).strip()), candidate)),
+            ]
+            for repaired in repairs:
+                try:
+                    return try_load(repaired)
+                except json.JSONDecodeError:
+                    continue
         raise
 
 
