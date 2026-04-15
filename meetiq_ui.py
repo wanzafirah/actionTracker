@@ -1,0 +1,102 @@
+import streamlit as st
+
+from meetiq_constants import STATUS_CFG, STATUSES
+from meetiq_utils import extract_entity_names, normalize_status, normalize_value, pill, pretty_deadline
+
+
+def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-label">{title}</div>
+            <div class="kpi-value" style="color:{accent}">{value}</div>
+            <div class="kpi-subtitle">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_completion_ring(percent: int) -> None:
+    safe_percent = max(0, min(int(percent), 100))
+    st.markdown(
+        f"""
+        <div class="completion-card">
+            <div class="kpi-label">Completion</div>
+            <div class="completion-wrap">
+                <div class="completion-ring" style="--pct:{safe_percent};">
+                    <div class="completion-inner">{safe_percent}%</div>
+                </div>
+            </div>
+            <div class="kpi-subtitle">Action completeness</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_action_card(action: dict, editable: bool = False, persist_callback=None) -> None:
+    status = normalize_status(action)
+    cfg = STATUS_CFG.get(status, STATUS_CFG["Pending"])
+    owner = normalize_value(action.get("owner"), "Not stated")
+    company = normalize_value(action.get("company"), "Internal")
+    suggestion = action.get("suggestion", "")
+    st.markdown(
+        f"""
+        <div class="action-card">
+            <div class="action-top">
+                <div class="action-title">{normalize_value(action.get('text'), 'Untitled action')}</div>
+                {pill(status, cfg['color'], cfg['bg'])}
+            </div>
+            <div class="action-meta">Assignee: {owner} | Company: {company} | Deadline: {pretty_deadline(normalize_value(action.get('deadline'), 'None'))}</div>
+            <div class="action-subtle">{normalize_value(suggestion, 'No next-step suggestion generated.')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if editable:
+        current = action.get("status", "Pending")
+        new_status = st.selectbox(
+            "Update status",
+            STATUSES,
+            index=STATUSES.index(current) if current in STATUSES else 0,
+            key=f"status_{action['id']}",
+            label_visibility="collapsed",
+        )
+        if new_status != current:
+            action["status"] = new_status
+            if persist_callback:
+                persist_callback()
+
+
+def render_chat_bubble(role: str, text: str) -> None:
+    safe_text = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+    st.markdown(f'<div class="chat-bubble {role}">{safe_text}</div>', unsafe_allow_html=True)
+
+
+def render_summary_panel(result: dict) -> None:
+    nlp = result.get("nlp_pipeline", {})
+    people_count = len(extract_entity_names(nlp.get("named_entities", {}).get("persons", [])))
+    action_count = len(result.get("action_items", []))
+    decision_count = len(result.get("key_decisions", []))
+    st.markdown(
+        f"""
+        <div class="hero-panel">
+            <div class="hero-badge">Executive Meeting Brief</div>
+            <h2>{normalize_value(result.get("title"), "Untitled meeting")}</h2>
+            <p>{normalize_value(result.get("summary"), "No summary generated.")}</p>
+            <div class="hero-grid">
+                <div><strong>Objective</strong><br>{normalize_value(result.get("objective"), "Not provided")}</div>
+                <div><strong>Follow-up</strong><br>{'Yes' if result.get('follow_up') else 'No'}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    k1, k2, k3 = st.columns(3)
+    with k1:
+        render_kpi_card("Action Items", str(action_count), "Extracted tasks", "#0f766e")
+    with k2:
+        render_kpi_card("Decisions", str(decision_count), "Decision signals", "#2563eb")
+    with k3:
+        render_kpi_card("People", str(people_count), "People involved", "#d97706")

@@ -1,11 +1,8 @@
 import json
-import html
 import os
 import re
-import tempfile
 import calendar
 from datetime import date, datetime
-from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
@@ -17,255 +14,62 @@ try:
 except ImportError:
     gspread = None
 
-try:
-    import whisper
-except ImportError:
-    whisper = None
-
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
-
-try:
-    from docx import Document
-except ImportError:
-    Document = None
-
-
-# ============================================================
-# Section 1. Configuration
-# ============================================================
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3.2"
-WHISPER_MODEL = "tiny"
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetiq_data.xlsx")
-MEETINGS_SHEET_NAME = "meetings"
-DEPARTMENTS_SHEET_NAME = "departments"
-MEETING_SHEET_COLUMNS = [
-    "id",
-    "title",
-    "date",
-    "meeting date",
-    "type",
-    "meeting type",
-    "category",
-    "district",
-    "summary",
-    "objective",
-    "outcome",
-    "followUp",
-    "followup",
-    "followUpReason",
-    "stakeholders",
-    "companies",
-    "keyDecisions",
-    "discussionPoints",
-    "nlpStats",
-    "transcript",
-    "deptId",
-    "deptName",
-    "department",
-    "actualCost",
-    "budgetUsed",
-    "estimatedCost",
-    "budgetNotes",
-    "actions",
-    "activityCategory",
-    "activityId",
-    "meetingID",
-    "activityTitle",
-    "role",
-    "mainActivity",
-    "linkPhoto",
-    "linkPhotoUrl",
-    "attach file",
-    "activityType",
-    "organizationType",
-    "dateFrom",
-    "dateTo",
-    "representativePosition",
-    "representativeName",
-    "representativeDepartment",
-    "activityObjective",
-    "invitationfrom",
-    "location meeting",
-    "other reps",
-    "recaps",
-    "sltdepartment",
-    "sltposition",
-    "sltreps",
-    "stfemail",
-    "supemail",
-    "updated by",
-]
-DEPARTMENT_SHEET_COLUMNS = ["id", "name", "budget"]
-
-
-def get_ollama_url() -> str:
-    secret_value = ""
-    try:
-        secret_value = st.secrets.get("OLLAMA_URL", "")
-    except Exception:
-        secret_value = ""
-    return os.getenv("OLLAMA_URL", secret_value or "http://127.0.0.1:11434/api/generate")
-
-
-OLLAMA_URL = get_ollama_url()
-
-
-def get_secret_value(name: str, default=""):
-    try:
-        value = st.secrets.get(name, default)
-        return value if value not in (None, "") else default
-    except Exception:
-        return default
-
-
-def get_google_service_account_info():
-    try:
-        secret_value = st.secrets.get("gcp_service_account")
-        if secret_value:
-            return dict(secret_value)
-    except Exception:
-        pass
-
-    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-    if raw_json:
-        try:
-            return json.loads(raw_json)
-        except json.JSONDecodeError:
-            return None
-    return None
-
-
-def get_google_sheet_target() -> dict:
-    return {
-        "id": os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_ID", "")),
-        "url": os.getenv("GOOGLE_SHEETS_SPREADSHEET_URL", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_URL", "")),
-        "name": os.getenv("GOOGLE_SHEETS_SPREADSHEET_NAME", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_NAME", "")),
-    }
-
-
-def get_supabase_config() -> dict:
-    url = os.getenv("SUPABASE_URL", get_secret_value("SUPABASE_URL", ""))
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY", get_secret_value("SUPABASE_SERVICE_ROLE_KEY", ""))
-        or os.getenv("SUPABASE_KEY", get_secret_value("SUPABASE_KEY", ""))
-        or os.getenv("SUPABASE_ANON_KEY", get_secret_value("SUPABASE_ANON_KEY", ""))
-    )
-    return {"url": url.rstrip("/"), "key": key}
-
-STATUSES = ["Pending", "In Progress", "Done", "Overdue", "Cancelled"]
-MTG_TYPES = ["Virtual", "Physical", "Not Provided"]
-CATEGORIES = ["Event", "External Meeting", "Internal Meeting", "Workshop"]
-ACTIVITY_CATEGORY_OPTIONS = [
-    "Internal Meeting",
-    "External Meeting",
-    "Workshop / Focus Group / Roundtable",
-    "Courtesy Call",
-    "Forum / Conference / Webinar",
-    "Open Day / Career Fair / related",
-    "Podcast / Interview",
-    "Speaking Engagement / Sharing Session",
-]
-ROLE_OPTIONS = ["Organiser", "Guest / Attendees", "Speaker", "Moderator", "Panel", "Auditor"]
-MAIN_ACTIVITY_OPTIONS = ["Yes", "No"]
-LINK_PHOTO_OPTIONS = ["refer to COMMS repository of photos", "Insert link", "No Photo"]
-ACTIVITY_TYPE_OPTIONS = ["Virtual", "Physical", "Both"]
-ORGANIZATION_TYPE_OPTIONS = ["Institution", "Company"]
-REPRESENTATIVE_POSITION_OPTIONS = [
-    "GROUP CHIEF EXECUTIVE OFFICER",
-    "GROUP CHIEF OPERATING OFFICER",
-    "GROUP CHIEF STRATEGY OFFICER",
-    "SENIOR VICE PRESIDENT I",
-    "SENIOR VICE PRESIDENT II",
-    "VICE PRESIDENT I",
-    "VICE PRESIDENT II",
-    "ASSISTANT VICE PRESIDENT I",
-    "ASSISTANT VICE PRESIDENT II",
-]
-DEFAULT_DEPARTMENTS = [
-    "Group client management",
-    "Group communications & public relations",
-    "Group information & communication technology",
-    "Group finance",
-    "Group government engagement & facilitation",
-    "Group human resources, admin & procurement",
-    "Group research & policy",
-    "Group CEO liaison office",
-    "Graduate & emerging talent",
-    "School Talent",
-    "MyMahir",
-    "Women, DEI & work-life practices",
-    "MyHeart facilitation",
-    "MyHeart Network",
-    "MYXpats operations",
-    "Residence Pass talent",
-]
-
-STATUS_CFG = {
-    "Pending": {"color": "#b45309", "bg": "#fde68a"},
-    "In Progress": {"color": "#1d4ed8", "bg": "#bfdbfe"},
-    "Done": {"color": "#166534", "bg": "#bbf7d0"},
-    "Overdue": {"color": "#991b1b", "bg": "#fecaca"},
-    "Cancelled": {"color": "#374151", "bg": "#d1d5db"},
-}
-
-
-# ============================================================
-# Section 2. AI Services
-# ============================================================
-
-def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
-    headers = {}
-    if "ngrok" in OLLAMA_URL:
-        headers["ngrok-skip-browser-warning"] = "true"
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": user_msg,
-        "system": system,
-        "stream": False,
-        "options": {
-            "num_predict": max_tokens,
-            "num_ctx": 2048,
-            "temperature": 0.1,
-            "top_p": 0.9,
-        },
-    }
-    try:
-        response = requests.post(OLLAMA_URL, json=payload, headers=headers, timeout=300)
-        response.raise_for_status()
-        return response.json().get("response", "")
-    except requests.HTTPError as exc:
-        status_code = exc.response.status_code if exc.response is not None else "unknown"
-        detail = exc.response.text[:500] if exc.response is not None else str(exc)
-        raise RuntimeError(f"Ollama request failed with status {status_code}. {detail}") from exc
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            f"Could not connect to Ollama at {OLLAMA_URL}. "
-            "If you are deploying on Streamlit Cloud, set OLLAMA_URL to a reachable server."
-        ) from exc
-
-
-# ============================================================
-# Section 3. Helpers
-# ============================================================
-
-def uid() -> str:
-    return uuid4().hex[:9]
-
-
-def today_str() -> str:
-    return date.today().isoformat()
-
-
-def generate_activity_id(category: str, meeting_date: date) -> str:
-    category_clean = re.sub(r"[^A-Z]", "", category.upper())
-    prefix = category_clean[:3] if category_clean else "ACT"
-    return f"{prefix}-{meeting_date.strftime('%Y%m%d')}-{uuid4().hex[:4].upper()}"
+from meetiq_constants import (
+    ACTIVITY_CATEGORY_OPTIONS,
+    ACTIVITY_TYPE_OPTIONS,
+    CATEGORIES,
+    DATA_FILE,
+    DEFAULT_DEPARTMENTS,
+    DEPARTMENTS_SHEET_NAME,
+    DEPARTMENT_SHEET_COLUMNS,
+    LINK_PHOTO_OPTIONS,
+    MAIN_ACTIVITY_OPTIONS,
+    MEETINGS_SHEET_NAME,
+    MEETING_SHEET_COLUMNS,
+    MTG_TYPES,
+    ORGANIZATION_TYPE_OPTIONS,
+    REPRESENTATIVE_POSITION_OPTIONS,
+    ROLE_OPTIONS,
+    STATUSES,
+)
+from meetiq_services import call_ollama, extract_text_from_document, transcribe_audio_file
+from meetiq_ui import render_action_card, render_chat_bubble, render_completion_ring, render_kpi_card, render_summary_panel
+from meetiq_utils import (
+    action_belongs_to_talentcorp,
+    add_month_columns,
+    append_document_to_transcript,
+    build_action_dataframe,
+    build_calendar_html,
+    build_meeting_dataframe,
+    compact_transcript_for_prompt,
+    days_left,
+    entity_text,
+    extract_entity_names,
+    fallback_discussion_points,
+    fallback_key_decisions,
+    filter_talentcorp_actions,
+    first_nonempty,
+    generate_activity_id,
+    get_pending_deadline_days,
+    get_upcoming_meetings,
+    html_lines,
+    is_objective_only_transcript,
+    join_list,
+    json_dumps_safe,
+    json_loads_safe,
+    load_text_list,
+    normalize_status,
+    normalize_value,
+    parse_yes_no,
+    pretty_deadline,
+    render_entity_list,
+    render_plotly_chart,
+    rm,
+    style_plotly,
+    today_str,
+    uid,
+    yes_no_text,
+)
 
 
 def set_generated_activity_id():
@@ -311,290 +115,6 @@ def clear_capture_inputs():
     st.session_state.capture_stfemail = ""
     st.session_state.capture_supemail = ""
     st.session_state.capture_updated_by = ""
-
-
-def days_left(deadline: str):
-    try:
-        return (datetime.strptime(deadline, "%Y-%m-%d").date() - date.today()).days
-    except Exception:
-        return None
-
-
-def rm(value) -> str:
-    try:
-        return f"RM {float(value):,.2f}" if value else "None"
-    except Exception:
-        return "None"
-
-
-def normalize_status(action: dict) -> str:
-    current = action.get("status", "Pending")
-    if current in ("Done", "Cancelled"):
-        return current
-    delta = days_left(action.get("deadline", ""))
-    if delta is not None and delta < 0:
-        return "Overdue"
-    return current
-
-
-def pretty_deadline(deadline: str) -> str:
-    if not deadline:
-        return "None"
-    delta = days_left(deadline)
-    if delta is None:
-        return deadline
-    if delta < 0:
-        return f"{deadline} | {abs(delta)}d overdue"
-    if delta == 0:
-        return f"{deadline} | due today"
-    return f"{deadline} | {delta}d left"
-
-
-def pill(label: str, color: str, bg: str) -> str:
-    return (
-        f"<span style='display:inline-block;padding:0.3rem 0.7rem;border-radius:999px;"
-        f"background:{bg};color:{color};font-weight:600;font-size:0.82rem'>{label}</span>"
-    )
-
-
-def join_list(items: list, fallback: str = "None") -> str:
-    clean = [str(item) for item in items if str(item).strip()]
-    return ", ".join(clean) if clean else fallback
-
-
-def entity_text(item) -> str:
-    if isinstance(item, dict):
-        for key in ("text", "name", "title", "value"):
-            value = item.get(key)
-            if value:
-                return str(value).strip()
-        return ""
-    return str(item).strip()
-
-
-def entity_confidence(item) -> str:
-    if isinstance(item, dict) and item.get("confidence") is not None:
-        try:
-            return f" ({float(item['confidence']):.1f})"
-        except Exception:
-            return ""
-    return ""
-
-
-def render_entity_list(items: list, fallback: str = "None") -> str:
-    cleaned = []
-    for item in items or []:
-        text = entity_text(item)
-        if text:
-            cleaned.append(f"{text}{entity_confidence(item)}")
-    return ", ".join(cleaned) if cleaned else fallback
-
-
-def extract_entity_names(items: list) -> list:
-    names = []
-    for item in items or []:
-        text = entity_text(item)
-        if text:
-            names.append(text)
-    return names
-
-
-def action_belongs_to_talentcorp(action: dict) -> bool:
-    company = normalize_value(action.get("company"), "").strip().lower()
-    owner = normalize_value(action.get("owner"), "").strip().lower()
-    text = normalize_value(action.get("text"), "").strip().lower()
-    allowed = ("", "none", "not stated", "internal", "talentcorp", "talent corp")
-    if company in allowed:
-        return True
-    if "talentcorp" in company or "talent corp" in company:
-        return True
-    if any(token in company for token in ("external", "partner", "company", "university", "college", "school")):
-        return False
-    if "talentcorp" in owner or "talent corp" in owner:
-        return True
-    if any(token in text for token in ("talentcorp", "our team", "internal team", "ce team", "comms", "slt")):
-        return True
-    return False
-
-
-def filter_talentcorp_actions(actions: list) -> list:
-    return [action for action in actions or [] if action_belongs_to_talentcorp(action)]
-
-
-def normalize_value(value, fallback: str = "None") -> str:
-    if value is None:
-        return fallback
-    if isinstance(value, str):
-        return value.strip() or fallback
-    if isinstance(value, dict):
-        for key in ("text", "title", "name", "decision", "point", "summary", "value"):
-            if key in value and str(value[key]).strip():
-                return str(value[key]).strip()
-        parts = [f"{k}: {v}" for k, v in value.items() if str(v).strip()]
-        return "; ".join(parts) if parts else fallback
-    if isinstance(value, list):
-        parts = [normalize_value(item, "") for item in value]
-        parts = [part for part in parts if part]
-        return ", ".join(parts) if parts else fallback
-    return str(value).strip() or fallback
-
-
-def html_lines(items, fallback: str = "None") -> str:
-    if not items:
-        return fallback
-    rendered = [normalize_value(item, "") for item in items]
-    rendered = [item for item in rendered if item]
-    return "<br>".join(rendered) if rendered else fallback
-
-
-def style_plotly(fig, height: int = 360):
-    fig.update_layout(
-        template="plotly_white",
-        height=height,
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        font=dict(color="#0f172a", size=13),
-        title_font=dict(color="#0f172a", size=18),
-        margin=dict(l=16, r=16, t=56, b=16),
-    )
-    fig.update_xaxes(showgrid=False, color="#334155")
-    fig.update_yaxes(gridcolor="#e2e8f0", zerolinecolor="#e2e8f0", color="#334155")
-    return fig
-
-
-def render_plotly_chart(fig, use_container_width: bool = True):
-    st.plotly_chart(fig, use_container_width=use_container_width, config={"displayModeBar": False})
-
-
-@st.cache_resource
-def get_local_whisper_model():
-    if whisper is None:
-        raise RuntimeError("Local Whisper is not installed. Install it with `pip install openai-whisper`.")
-    return whisper.load_model(WHISPER_MODEL)
-
-
-def transcribe_audio_file(uploaded_file, translate_to_english: bool = True) -> str:
-    model = get_local_whisper_model()
-    file_name = getattr(uploaded_file, "name", "meeting_audio.wav")
-    file_bytes = uploaded_file.getvalue()
-    if not file_bytes:
-        raise RuntimeError("Audio file is empty.")
-
-    suffix = os.path.splitext(file_name)[1] or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-        temp_file.write(file_bytes)
-        temp_path = temp_file.name
-
-    try:
-        result = model.transcribe(
-            temp_path,
-            task="translate" if translate_to_english else "transcribe",
-            fp16=False,
-        )
-        return (result.get("text") or "").strip()
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
-
-def dataframe_to_meeting_text(frame: pd.DataFrame, row_limit: int = 40) -> str:
-    frame = frame.fillna("")
-    if frame.empty:
-        return ""
-
-    records = []
-    for row_index, row in frame.head(row_limit).iterrows():
-        fields = []
-        for column in frame.columns:
-            value = str(row[column]).strip()
-            if value:
-                fields.append(f"{column}: {value}")
-        if fields:
-            records.append(f"Row {row_index + 1}: " + " | ".join(fields))
-    return "\n".join(records)
-
-
-def extract_text_from_document(uploaded_file) -> str:
-    file_name = getattr(uploaded_file, "name", "document").lower()
-
-    if file_name.endswith(".pdf"):
-        if PdfReader is None:
-            raise RuntimeError("PDF support requires `pypdf`. Install it with `pip install pypdf`.")
-        reader = PdfReader(uploaded_file)
-        pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n".join(page.strip() for page in pages if page.strip())
-
-    if file_name.endswith(".docx"):
-        if Document is None:
-            raise RuntimeError("Word support requires `python-docx`. Install it with `pip install python-docx`.")
-        doc = Document(uploaded_file)
-        return "\n".join(paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip())
-
-    if file_name.endswith((".xlsx", ".xls")):
-        sheets = pd.read_excel(uploaded_file, sheet_name=None)
-        chunks = []
-        for sheet_name, frame in sheets.items():
-            chunks.append(f"Sheet: {sheet_name}")
-            chunks.append(dataframe_to_meeting_text(frame))
-        return "\n\n".join(chunk for chunk in chunks if chunk.strip())
-
-    if file_name.endswith(".csv"):
-        frame = pd.read_csv(uploaded_file)
-        return dataframe_to_meeting_text(frame)
-
-    raise RuntimeError("Unsupported document format. Use PDF, DOCX, XLSX, XLS, or CSV.")
-
-
-def json_dumps_safe(value) -> str:
-    return json.dumps(value if value is not None else {}, ensure_ascii=False)
-
-
-def json_loads_safe(value, fallback):
-    if value in ("", None) or (isinstance(value, float) and pd.isna(value)):
-        return fallback
-    try:
-        return json.loads(value)
-    except Exception:
-        return fallback
-
-
-def first_nonempty(row: dict, *keys: str, fallback=""):
-    for key in keys:
-        value = row.get(key, "")
-        if value in ("", None):
-            continue
-        if isinstance(value, float) and pd.isna(value):
-            continue
-        return value
-    return fallback
-
-
-def parse_yes_no(value) -> bool:
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in ("yes", "y", "true", "1"):
-            return True
-        if normalized in ("no", "n", "false", "0"):
-            return False
-    return bool(value)
-
-
-def yes_no_text(value) -> str:
-    return "Yes" if parse_yes_no(value) else "No"
-
-
-def load_text_list(value) -> list:
-    if value in ("", None) or (isinstance(value, float) and pd.isna(value)):
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        parsed = json_loads_safe(value, None)
-        if isinstance(parsed, list):
-            return [str(item).strip() for item in parsed if str(item).strip()]
-        return [part.strip() for part in re.split(r"[;,]\s*", value) if part.strip()]
-    text = str(value).strip()
-    return [text] if text else []
 
 
 def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFrame):
@@ -1261,46 +781,6 @@ def build_meeting_email_body(meeting: dict, recipient_name: str = "", sender_nam
 # Section 4. UI Components
 # ============================================================
 
-def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-label">{title}</div>
-            <div class="kpi-value" style="color:{accent}">{value}</div>
-            <div class="kpi-subtitle">{subtitle}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_kpi_link_card(title: str, value: str, subtitle: str, accent: str, page: str, focus: str, key: str) -> None:
-    render_kpi_card(title, value, subtitle, accent)
-
-
-def render_completion_ring(percent: int) -> None:
-    safe_percent = max(0, min(int(percent), 100))
-    st.markdown(
-        f"""
-        <div class="completion-card">
-            <div class="kpi-label">Completion</div>
-            <div class="completion-wrap">
-                <div class="completion-ring" style="--pct:{safe_percent};">
-                    <div class="completion-inner">{safe_percent}%</div>
-                </div>
-            </div>
-            <div class="kpi-subtitle">Action completeness</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_completion_link_ring(percent: int, page: str, focus: str, key: str) -> None:
-    safe_percent = max(0, min(int(percent), 100))
-    render_completion_ring(safe_percent)
-
-
 def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
     st.markdown(
         """
@@ -1333,224 +813,6 @@ def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
         key=f"{key_prefix}_body",
     )
 
-
-def render_action_card(action: dict, editable: bool = False) -> None:
-    status = normalize_status(action)
-    cfg = STATUS_CFG.get(status, STATUS_CFG["Pending"])
-    owner = normalize_value(action.get("owner"), "Not stated")
-    company = normalize_value(action.get("company"), "Internal")
-    suggestion = action.get("suggestion", "")
-    st.markdown(
-        f"""
-        <div class="action-card">
-            <div class="action-top">
-                <div class="action-title">{normalize_value(action.get('text'), 'Untitled action')}</div>
-                {pill(status, cfg['color'], cfg['bg'])}
-            </div>
-            <div class="action-meta">Assignee: {owner} | Company: {company} | Deadline: {pretty_deadline(normalize_value(action.get('deadline'), 'None'))}</div>
-            <div class="action-subtle">{normalize_value(suggestion, 'No next-step suggestion generated.')}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    if editable:
-        current = action.get("status", "Pending")
-        new_status = st.selectbox(
-            "Update status",
-            STATUSES,
-            index=STATUSES.index(current) if current in STATUSES else 0,
-            key=f"status_{action['id']}",
-            label_visibility="collapsed",
-        )
-        if new_status != current:
-            action["status"] = new_status
-            persist_app_data()
-
-
-def render_chat_bubble(role: str, text: str) -> None:
-    safe_text = html.escape(str(text)).replace("\n", "<br>")
-    st.markdown(
-        f"""
-        <div class="chat-bubble {role}">
-            {safe_text}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def build_meeting_dataframe(meetings: list) -> pd.DataFrame:
-    if not meetings:
-        return pd.DataFrame()
-    rows = []
-    for meeting in meetings:
-        nlp_stats = meeting.get("nlpStats", {})
-        rows.append(
-            {
-                "id": meeting["id"],
-                "title": meeting["title"],
-                "date": meeting["date"],
-                "month": pd.to_datetime(meeting["date"]).strftime("%Y-%m"),
-                "year": pd.to_datetime(meeting["date"]).year,
-                "type": meeting.get("type", "Not Provided"),
-                "category": meeting.get("category", "Internal Meeting"),
-                "follow_up": bool(meeting.get("followUp")),
-                "actions_count": len(meeting.get("actions", [])),
-                "decisions_count": len(meeting.get("keyDecisions", [])),
-                "discussion_count": len(meeting.get("discussionPoints", [])),
-                "cost": meeting.get("actualCost", 0),
-                "token_count": nlp_stats.get("token_count", 0),
-                "sentence_count": nlp_stats.get("sentence_count", 0),
-                "department": meeting.get("deptName", "") or "Unassigned",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def build_action_dataframe(meetings: list) -> pd.DataFrame:
-    rows = []
-    for meeting in meetings:
-        for action in meeting.get("actions", []):
-            rows.append(
-                {
-                    "id": action["id"],
-                    "meeting_id": meeting["id"],
-                    "meeting_title": meeting["title"],
-                    "meeting_date": meeting["date"],
-                    "text": normalize_value(action.get("text"), "Untitled action"),
-                    "owner": normalize_value(action.get("owner"), "Not stated"),
-                    "company": normalize_value(action.get("company"), "Internal"),
-                    "deadline": normalize_value(action.get("deadline"), "None"),
-                    "status": normalize_status(action),
-                    "priority": action.get("priority", "Medium"),
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-def add_month_columns(df: pd.DataFrame, date_column: str) -> pd.DataFrame:
-    if df.empty:
-        return df.copy()
-    output = df.copy()
-    parsed_dates = pd.to_datetime(output[date_column], errors="coerce")
-    output["year"] = parsed_dates.dt.year
-    output["month_num"] = parsed_dates.dt.month
-    output["month_label"] = parsed_dates.dt.strftime("%b")
-    return output
-
-
-def search_meetings(meetings: list, query: str) -> list:
-    needle = query.strip().lower()
-    if not needle:
-        return meetings[:6]
-
-    matches = []
-    for meeting in meetings:
-        haystack_parts = [
-            meeting.get("title", ""),
-            meeting.get("summary", ""),
-            meeting.get("meetingID", ""),
-            meeting.get("activityId", ""),
-            meeting.get("deptName", ""),
-            meeting.get("department", ""),
-            meeting.get("sltdepartment", ""),
-            join_list(meeting.get("stakeholders", []), ""),
-            join_list(meeting.get("companies", []), ""),
-        ]
-        haystack = " ".join(haystack_parts).lower()
-        if needle in haystack:
-            matches.append(meeting)
-    return matches
-
-
-def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
-    dated_meetings = []
-    for meeting in meetings:
-        if not meeting.get("actions"):
-            continue
-        try:
-            meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
-            dated_meetings.append((meeting_date, meeting))
-        except Exception:
-            continue
-
-    upcoming = [item for item in dated_meetings if item[0] >= date.today()]
-    selected = sorted(upcoming, key=lambda item: item[0])[:limit]
-    if not selected:
-        selected = sorted(dated_meetings, key=lambda item: item[0], reverse=True)[:limit]
-    return [meeting for _, meeting in selected]
-
-
-def get_pending_deadline_days(meetings: list, year: int, month: int) -> set:
-    pending_days = set()
-    for meeting in meetings:
-        for action in meeting.get("actions", []):
-            if normalize_status(action) != "Pending":
-                continue
-            deadline = normalize_value(action.get("deadline"), "")
-            if not deadline or deadline == "None":
-                continue
-            try:
-                parsed = datetime.strptime(str(deadline), "%Y-%m-%d").date()
-            except Exception:
-                continue
-            if parsed.year == year and parsed.month == month:
-                pending_days.add(parsed.day)
-    return pending_days
-
-
-def build_calendar_html(meetings: list, year: int, month: int) -> str:
-    cal = calendar.Calendar(firstweekday=0)
-    weeks = cal.monthdayscalendar(year, month)
-    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    header = "".join(f"<div class='calendar-day-label'>{label}</div>" for label in day_labels)
-    cells = []
-    today = date.today()
-    pending_days = get_pending_deadline_days(meetings, year, month)
-    for week in weeks:
-        for day_num in week:
-            classes = ["calendar-day"]
-            label = "" if day_num == 0 else str(day_num)
-            if day_num == 0:
-                classes.append("empty")
-            else:
-                if day_num in pending_days:
-                    classes.append("pending-deadline")
-                if day_num == today.day and month == today.month and year == today.year:
-                    classes.append("today")
-            cells.append(f"<div class='{' '.join(classes)}'>{label}</div>")
-
-    return f"""
-    <div class="calendar-widget">
-        <div class="calendar-grid calendar-head">{header}</div>
-        <div class="calendar-grid">{''.join(cells)}</div>
-    </div>
-    """
-
-
-def render_search_result_card(meeting: dict) -> None:
-    st.markdown(
-        f"""
-        <div class="search-result-card">
-            <div class="search-result-top">
-                <div>
-                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled meeting')}</div>
-                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')} | {normalize_value(meeting.get('date'), 'No date')}</div>
-                </div>
-                <div class="result-pill">{'Yes' if meeting.get('followUp') else 'No'} follow-up</div>
-            </div>
-            <div class="mini-copy">{normalize_value(meeting.get('summary'), 'No summary available.')}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    actions = meeting.get("actions", [])
-    if actions:
-        st.markdown("**Tasks**")
-        for action in actions:
-            render_action_card(action)
-
-
 def render_dashboard_chat(meetings: list) -> None:
     st.markdown('<div class="chat-thread dashboard-chat-thread">', unsafe_allow_html=True)
     if st.session_state.chat_history:
@@ -1577,37 +839,6 @@ def render_dashboard_chat(meetings: list) -> None:
 # ============================================================
 # Section 5. Meeting Analysis Prompt
 # ============================================================
-
-def render_summary_panel(result: dict) -> None:
-    nlp = result.get("nlp_pipeline", {})
-    people_count = len(nlp.get("named_entities", {}).get("persons", []))
-    action_count = len(result.get("action_items", []))
-    decision_count = len(result.get("key_decisions", []))
-
-    st.markdown(
-        f"""
-        <div class="hero-panel">
-            <div class="hero-badge">Executive Meeting Brief</div>
-            <h2>{normalize_value(result.get("title"), "Untitled meeting")}</h2>
-            <p>{normalize_value(result.get("summary"), "No summary generated.")}</p>
-            <div class="hero-grid">
-                <div><strong>Objective</strong><br>{normalize_value(result.get("objective"), "Not provided")}</div>
-                <div><strong>Follow-up</strong><br>{'Yes' if result.get('follow_up') else 'No'}</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        render_kpi_card("Action Items", str(action_count), "Extracted tasks", "#0f766e")
-    with k2:
-        render_kpi_card("Decisions", str(decision_count), "Decision signals", "#2563eb")
-    with k3:
-        render_kpi_card("People", str(people_count), "People involved", "#d97706")
-
-
 PIPELINE_SYSTEM = """You are a meeting intelligence system. Return ONLY valid JSON.
 
 Goals:
@@ -2965,66 +2196,164 @@ if st.session_state.current_page == "Productivity":
 
 if st.session_state.current_page == "Tracker":
     st.subheader("Action Tracker")
+    def meeting_tracker_status(meeting: dict) -> str:
+        actions = meeting.get("actions", [])
+        if not actions:
+            return "Completed"
+        open_statuses = {"Pending", "In Progress", "Overdue"}
+        if any(normalize_status(action) in open_statuses for action in actions):
+            return "Pending"
+        return "Completed"
 
-    if action_df.empty:
-        st.info("No action items yet.")
+    tracker_focus = st.session_state.get("tracker_focus", "all")
+    status_default = "All"
+    if tracker_focus == "open":
+        status_default = "Pending"
+        st.caption("Showing pending meetings from the dashboard shortcut.")
+    elif tracker_focus == "done":
+        status_default = "Completed"
+        st.caption("Showing completed meetings from the dashboard shortcut.")
+
+    meeting_records = []
+    for meeting in meetings:
+        meeting_records.append(
+            {
+                "meeting": meeting,
+                "status": meeting_tracker_status(meeting),
+                "meeting_id": normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), ""),
+                "title": normalize_value(meeting.get("title"), "Untitled meeting"),
+                "group": normalize_value(meeting.get("deptName") or meeting.get("department") or meeting.get("sltdepartment"), ""),
+                "summary": normalize_value(meeting.get("summary") or meeting.get("recaps"), ""),
+                "keywords": " ".join(
+                    [
+                        normalize_value(meeting.get("title"), ""),
+                        normalize_value(meeting.get("summary"), ""),
+                        normalize_value(meeting.get("recaps"), ""),
+                        normalize_value(meeting.get("meetingID"), ""),
+                        normalize_value(meeting.get("activityId"), ""),
+                        normalize_value(meeting.get("deptName"), ""),
+                        normalize_value(meeting.get("department"), ""),
+                        normalize_value(meeting.get("sltdepartment"), ""),
+                        join_list(meeting.get("stakeholders", []), ""),
+                        join_list(meeting.get("companies", []), ""),
+                    ]
+                ).lower(),
+            }
+        )
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        render_kpi_card("Saved Meetings", str(len(meeting_records)), "Stored records", "#0f766e")
+    with c2:
+        render_kpi_card("Pending", str(sum(1 for record in meeting_records if record["status"] == "Pending")), "Meetings with open actions", "#d97706")
+    with c3:
+        render_kpi_card("Completed", str(sum(1 for record in meeting_records if record["status"] == "Completed")), "Closed or no-action meetings", "#16a34a")
+    with c4:
+        completion_pct = round(
+            (
+                sum(1 for record in meeting_records if record["status"] == "Completed") / len(meeting_records)
+            ) * 100
+        ) if meeting_records else 0
+        render_completion_ring(completion_pct)
+
+    filt_left, filt_right = st.columns([1.4, 1])
+    with filt_left:
+        meeting_search = st.text_input(
+            "Search meeting",
+            placeholder="Search by event name, keyword, generated ID, or group name",
+            key="tracker_meeting_search",
+        )
+    with filt_right:
+        status_options = ["All", "Pending", "Completed"]
+        status_index = status_options.index(status_default) if status_default in status_options else 0
+        meeting_status_filter = st.selectbox("Meeting Status", status_options, index=status_index, key="tracker_meeting_status")
+
+    if tracker_focus != "all":
+        if st.button("Clear Tracker Shortcut", key="clear_tracker_shortcut"):
+            st.session_state.tracker_focus = "all"
+            st.session_state.tracker_meeting_status = "All"
+            st.rerun()
+
+    filtered_meetings = meeting_records
+    if meeting_status_filter != "All":
+        filtered_meetings = [record for record in filtered_meetings if record["status"] == meeting_status_filter]
+
+    search_needle = meeting_search.strip().lower()
+    if search_needle:
+        filtered_meetings = [
+            record for record in filtered_meetings
+            if search_needle in record["keywords"]
+        ]
+
+    st.markdown("### Saved Meetings")
+    if not filtered_meetings:
+        st.info("No saved meetings match the selected search or status.")
     else:
-        tracker_focus = st.session_state.get("tracker_focus", "all")
-        if tracker_focus == "open":
-            st.caption("Showing open items from the dashboard shortcut.")
-        elif tracker_focus == "done":
-            st.caption("Showing completed items from the dashboard shortcut.")
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            render_kpi_card("Open Actions", str(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])), "Work still active", "#0f766e")
-        with c2:
-            render_kpi_card("Overdue", str(len(action_df[action_df["status"] == "Overdue"])), "Needs attention", "#dc2626")
-        with c3:
-            render_kpi_card("Owners", str(action_df["owner"].nunique()), "Distinct assignees", "#2563eb")
-        with c4:
-            render_kpi_card("Companies", str(action_df["company"].nunique()), "Cross-org tasks", "#7c3aed")
-
-        filt_left, filt_mid, filt_right = st.columns([1, 1, 1.2])
-        with filt_left:
-            company_filter = st.selectbox("Company", ["All"] + sorted(action_df["company"].dropna().unique().tolist()))
-        with filt_mid:
-            status_filter = st.selectbox("Status", ["All"] + STATUSES)
-        with filt_right:
-            action_search = st.text_input("Search action", placeholder="Search by task, assignee, or meeting")
-
-        filtered_actions = filter_action_records(action_df, company_filter, status_filter, action_search)
-        if tracker_focus == "open":
-            filtered_actions = filtered_actions[filtered_actions["status"].isin(["Pending", "In Progress", "Overdue"])]
-        elif tracker_focus == "done":
-            filtered_actions = filtered_actions[filtered_actions["status"] == "Done"]
-
-        if tracker_focus != "all":
-            if st.button("Clear Tracker Shortcut", key="clear_tracker_shortcut"):
-                st.session_state.tracker_focus = "all"
-                st.rerun()
-
-        st.markdown("### Action Queue")
-        if filtered_actions.empty:
-            st.info("No action items match the selected filters.")
-        else:
-            filtered_actions = filtered_actions.sort_values(["meeting_date", "meeting_title"], ascending=[False, True])
-            for meeting_date, day_group in filtered_actions.groupby("meeting_date", sort=False):
-                st.markdown(f"<div class='date-group'>{meeting_date}</div>", unsafe_allow_html=True)
-                for record in day_group.to_dict("records"):
-                    raw_action = next(
-                        (
-                            action
-                            for meeting in meetings
-                            if meeting["id"] == record["meeting_id"]
-                            for action in meeting.get("actions", [])
-                            if action["id"] == record["id"]
-                        ),
-                        None,
+        filtered_meetings = sorted(
+            filtered_meetings,
+            key=lambda record: normalize_value(record["meeting"].get("date"), "0000-00-00"),
+            reverse=True,
+        )
+        for record in filtered_meetings:
+            meeting = record["meeting"]
+            status_text = record["status"]
+            status_cfg = {"Pending": "#d97706", "Completed": "#16a34a"}
+            subtitle = "Open action items" if status_text == "Pending" else "No pending action items"
+            header = f"{record['title']} | {record['meeting_id'] or 'No ID'} | {normalize_value(meeting.get('date'), 'No date')}"
+            with st.expander(header):
+                top_left, top_right = st.columns([1.35, 0.65])
+                with top_left:
+                    st.markdown(
+                        f"""
+                        <div class="info-card">
+                            <div class="mini-title">Summary</div>
+                            <div class="mini-copy">{normalize_value(meeting.get('summary'), 'No summary available.')}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
                     )
-                    if raw_action:
-                        st.caption(record["meeting_title"])
-                        render_action_card(raw_action)
+                with top_right:
+                    render_kpi_card("Status", status_text, subtitle, status_cfg[status_text])
+                    render_kpi_card("Actions", str(len(meeting.get("actions", []))), "Tracked items", "#1e3a5f")
+
+                meta_left, meta_right = st.columns(2)
+                with meta_left:
+                    st.markdown(
+                        f"""
+                        <div class="info-card">
+                            <div class="mini-title">Group / Department</div>
+                            <div class="mini-copy">{normalize_value(record.get('group'), 'None')}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                with meta_right:
+                    st.markdown(
+                        f"""
+                        <div class="info-card">
+                            <div class="mini-title">Follow-up</div>
+                            <div class="mini-copy">{'Yes' if status_text == 'Pending' else 'No'}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                if meeting.get("keyDecisions"):
+                    st.markdown("**Key Decisions**")
+                    for decision in meeting["keyDecisions"]:
+                        st.write(normalize_value(decision))
+
+                if meeting.get("discussionPoints"):
+                    st.markdown("**Discussion Points**")
+                    for point in meeting["discussionPoints"]:
+                        st.write(normalize_value(point))
+
+                if meeting.get("actions"):
+                    st.markdown("**Action Items**")
+                    for action in meeting["actions"]:
+                        render_action_card(action, editable=True, persist_callback=persist_app_data)
+                else:
+                    st.success("No action item. This meeting is considered completed.")
 
 
 # ============================================================
