@@ -72,6 +72,49 @@ from meetiq_utils import (
 )
 
 
+def get_secret_value(name: str, default=""):
+    try:
+        value = st.secrets.get(name, default)
+        return value if value not in (None, "") else default
+    except Exception:
+        return default
+
+
+def get_google_service_account_info():
+    try:
+        secret_value = st.secrets.get("gcp_service_account")
+        if secret_value:
+            return dict(secret_value)
+    except Exception:
+        pass
+
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if raw_json:
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def get_google_sheet_target() -> dict:
+    return {
+        "id": os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_ID", "")),
+        "url": os.getenv("GOOGLE_SHEETS_SPREADSHEET_URL", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_URL", "")),
+        "name": os.getenv("GOOGLE_SHEETS_SPREADSHEET_NAME", get_secret_value("GOOGLE_SHEETS_SPREADSHEET_NAME", "")),
+    }
+
+
+def get_supabase_config() -> dict:
+    url = os.getenv("SUPABASE_URL", get_secret_value("SUPABASE_URL", ""))
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", get_secret_value("SUPABASE_SERVICE_ROLE_KEY", ""))
+        or os.getenv("SUPABASE_KEY", get_secret_value("SUPABASE_KEY", ""))
+        or os.getenv("SUPABASE_ANON_KEY", get_secret_value("SUPABASE_ANON_KEY", ""))
+    )
+    return {"url": url.rstrip("/"), "key": key}
+
+
 def set_generated_activity_id():
     category = st.session_state.get("capture_activity_category", "")
     st.session_state.capture_activity_id = generate_activity_id(category, date.today())
