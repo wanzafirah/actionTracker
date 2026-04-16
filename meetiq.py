@@ -2142,7 +2142,7 @@ if st.session_state.current_page == "Capture":
                 placeholder="Add one organization per line",
             )
             dates_text = st.text_area(
-                "Date",
+                "Dates Mentioned",
                 value="\n".join(extract_entity_names(entities.get("dates", []))),
                 key="preview_dates",
                 height=100,
