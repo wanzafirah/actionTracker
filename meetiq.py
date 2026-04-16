@@ -119,7 +119,8 @@ def get_supabase_config() -> dict:
 
 def set_generated_activity_id():
     category = st.session_state.get("capture_activity_category", "")
-    st.session_state.capture_activity_id = generate_activity_id(category, date.today())
+    meeting_date_value = st.session_state.get("capture_meeting_date", date.today())
+    st.session_state.capture_activity_id = generate_activity_id(category, meeting_date_value, st.session_state.get("meetings", []))
 
 
 def clear_generated_activity_id():
@@ -1888,17 +1889,17 @@ if st.session_state.current_page == "Capture":
         act_left, act_right = st.columns(2)
         dept_names = get_department_options()
         with act_left:
+            activity_category = st.selectbox("Category", CATEGORIES, key="capture_activity_category")
             activity_id = st.text_input("Activity ID", key="capture_activity_id", placeholder="Generate or enter activity ID")
             st.button("Generate Activity ID", key="generate_activity_id_btn", on_click=set_generated_activity_id)
             st.button("Clear Activity ID", key="clear_activity_id_btn", on_click=clear_generated_activity_id)
             activity_title = st.text_input("Title", key="capture_activity_title", placeholder="Enter meeting or activity title")
             activity_type = st.selectbox("Activity Type", ACTIVITY_TYPE_OPTIONS, key="capture_activity_type")
         with act_right:
-            meeting_date = st.date_input("Meeting Date", value=date.today())
+            meeting_date = st.date_input("Meeting Date", value=date.today(), key="capture_meeting_date")
             actual_cost = st.number_input("Actual Cost (RM)", min_value=0.0, step=50.0)
             dept_choice = st.selectbox("Department", dept_names)
 
-    activity_category = ""
     role = ""
     main_activity = ""
     link_photo = ""
@@ -2001,8 +2002,9 @@ if st.session_state.current_page == "Capture":
             st.button("Clear Input", key="capture_clear_btn", on_click=clear_capture_inputs, use_container_width=True)
 
     resolved_activity_id = st.session_state.capture_activity_id.strip() or generate_activity_id(
-        activity_type or "ACT",
-        date.today(),
+        activity_category,
+        meeting_date,
+        st.session_state.get("meetings", []),
     )
 
     if run_clicked:
