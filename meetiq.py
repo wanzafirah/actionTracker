@@ -655,6 +655,27 @@ def make_action_preview_item(action: dict, action_id: str, status: str = "Pendin
 
 
 def build_email_preview_meeting(result: dict, pending: dict) -> dict:
+    preview_actions = pending.get("preview_actions")
+    if preview_actions:
+        actions = [
+            {
+                "text": normalize_value(action.get("text"), "Untitled action"),
+                "owner": normalize_value(action.get("owner"), "Not stated"),
+                "deadline": normalize_value(action.get("deadline"), "None"),
+                "status": normalize_value(action.get("status"), "Pending"),
+            }
+            for action in preview_actions
+        ]
+    else:
+        actions = [
+            {
+                "text": normalize_value(action.get("text"), "Untitled action"),
+                "owner": normalize_value(action.get("owner"), "Not stated"),
+                "deadline": normalize_value(action.get("deadline"), "None"),
+                "status": "Pending",
+            }
+            for action in result.get("action_items", [])
+        ]
     return {
         "title": result.get("title") or pending.get("activity_title", "Untitled"),
         "date": pending.get("meeting_date", today_str()),
@@ -666,21 +687,14 @@ def build_email_preview_meeting(result: dict, pending: dict) -> dict:
         "followUp": result.get("follow_up", False),
         "followUpReason": result.get("follow_up_reason", ""),
         "keyDecisions": result.get("key_decisions", []),
-        "actions": [
-            {
-                "text": normalize_value(action.get("text"), "Untitled action"),
-                "owner": normalize_value(action.get("owner"), "Not stated"),
-                "deadline": normalize_value(action.get("deadline"), "None"),
-                "status": "Pending",
-            }
-            for action in result.get("action_items", [])
-        ],
+        "actions": actions,
     }
 
 
 def build_meeting_record(result: dict, pending: dict) -> dict:
     meeting_id = uid()
     department = find_department_by_name(pending["dept"])
+    preview_actions = pending.get("preview_actions", [])
     return {
         "id": meeting_id,
         "title": result.get("title") or pending.get("activity_title", "Untitled"),
@@ -735,10 +749,20 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
         "otherReps": pending.get("other_reps", ""),
         "updatedBy": pending.get("updated_by", ""),
         "activityObjective": pending.get("activity_objective", ""),
-        "actions": [
-            make_action_preview_item(action, f"{meeting_id}_a{index}")
-            for index, action in enumerate(result.get("action_items", []))
-        ],
+        "actions": (
+            [
+                {
+                    **action,
+                    "id": f"{meeting_id}_a{index}",
+                }
+                for index, action in enumerate(preview_actions)
+            ]
+            if preview_actions
+            else [
+                make_action_preview_item(action, f"{meeting_id}_a{index}")
+                for index, action in enumerate(result.get("action_items", []))
+            ]
+        ),
     }
 
 
@@ -2065,6 +2089,11 @@ if st.session_state.current_page == "Capture":
         pending = st.session_state.pending_result
         result = dict(pending["result"])
         result["title"] = result.get("title") or pending.get("activity_title", "Untitled")
+        if "preview_actions" not in pending:
+            pending["preview_actions"] = [
+                make_action_preview_item(action, f"preview_{index}")
+                for index, action in enumerate(result.get("action_items", []))
+            ]
         render_summary_panel(result)
 
         def parse_preview_list(value: str) -> list:
@@ -2128,10 +2157,10 @@ if st.session_state.current_page == "Capture":
             result["nlp_pipeline"]["named_entities"] = entities
 
         st.markdown("### Action Plan")
-        actions = result.get("action_items", [])
-        if actions:
-            for index, item in enumerate(actions):
-                render_action_card(make_action_preview_item(item, f"preview_{index}"))
+        preview_actions = pending.get("preview_actions", [])
+        if preview_actions:
+            for action in preview_actions:
+                render_action_card(action, editable=True)
         else:
             st.info("No action items detected.")
 
@@ -2198,20 +2227,25 @@ if st.session_state.current_page == "Dashboard":
                 st.info("No upcoming projects yet.")
             else:
                 for meeting in upcoming_meetings:
-                    st.markdown(
-                        f"""
-                        <div class="upcoming-item">
-                            <div class="upcoming-top">
-                                <div>
-                                    <div class="mini-title">{normalize_value(meeting.get('title'), 'Untitled')}</div>
-                                    <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
+                    with st.expander(normalize_value(meeting.get("title"), "Untitled")):
+                        st.markdown(
+                            f"""
+                            <div class="upcoming-item">
+                                <div class="upcoming-top">
+                                    <div>
+                                        <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
+                                    </div>
+                                    <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
                                 </div>
-                                <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
                             </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(f"**Summary:** {normalize_value(meeting.get('summary'), 'No summary available.')}")
+                        if meeting.get("actions"):
+                            st.markdown("**Action Items**")
+                            for action in meeting.get("actions", []):
+                                render_action_card(action)
 
     with dashboard_right:
         calendar_card = st.container(border=True)
