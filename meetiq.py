@@ -1753,7 +1753,6 @@ if st.session_state.current_page == "Capture":
 
     activity_box = st.container(border=True)
     with activity_box:
-        st.markdown("### Activity Details")
         act_left, act_right = st.columns(2)
         dept_names = get_department_options()
         with act_left:
@@ -2033,10 +2032,19 @@ if st.session_state.current_page == "Capture":
 if st.session_state.current_page == "Dashboard":
     dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
 
-    done_count = int((action_df["status"] == "Done").sum()) if not action_df.empty else 0
-    overdue_count = int((action_df["status"] == "Overdue").sum()) if not action_df.empty else 0
-    open_count = int(len(action_df[action_df["status"].isin(["Pending", "In Progress", "Overdue"])])) if not action_df.empty else 0
-    completion_pct = round((done_count / len(action_df)) * 100) if not action_df.empty and len(action_df) else 0
+    def meeting_dashboard_status(meeting: dict) -> str:
+        actions = meeting.get("actions", [])
+        if not actions:
+            return "Completed"
+        open_statuses = {"Pending", "In Progress", "Overdue"}
+        if any(normalize_status(action) in open_statuses for action in actions):
+            return "Pending"
+        return "Completed"
+
+    dashboard_meeting_records = [{"meeting": meeting, "status": meeting_dashboard_status(meeting)} for meeting in meetings]
+    done_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Completed")
+    open_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Pending")
+    completion_pct = round((done_count / len(dashboard_meeting_records)) * 100) if dashboard_meeting_records else 0
 
     dashboard_left, dashboard_right = st.columns([1.35, 0.85])
     with dashboard_left:
@@ -2047,9 +2055,9 @@ if st.session_state.current_page == "Dashboard":
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_card("Open Tasks", str(open_count), "Pending follow-up", "#d97706")
+                render_kpi_card("Open Tasks", str(open_count), "Meetings with open actions", "#d97706")
             with c3:
-                render_kpi_card("Done", str(done_count), "Completed actions", "#16a34a")
+                render_kpi_card("Done", str(done_count), "Closed or no-action meetings", "#16a34a")
             with c4:
                 render_completion_ring(completion_pct)
 
