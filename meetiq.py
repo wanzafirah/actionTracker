@@ -53,7 +53,6 @@ from meetiq_utils import (
     first_nonempty,
     generate_activity_id,
     get_pending_deadline_days,
-    get_meetings_for_deadline,
     get_upcoming_meetings,
     html_lines,
     is_objective_only_transcript,
@@ -1825,8 +1824,6 @@ def init_state():
         st.session_state.current_page = "Dashboard"
     if "tracker_focus" not in st.session_state:
         st.session_state.tracker_focus = "all"
-    if "selected_deadline_filter" not in st.session_state:
-        st.session_state.selected_deadline_filter = ""
 
 
 init_state()
@@ -2225,18 +2222,12 @@ if st.session_state.current_page == "Dashboard":
         upcoming_card = st.container(border=True)
         with upcoming_card:
             st.markdown("### Upcoming Project")
-            selected_deadline_filter = st.session_state.get("selected_deadline_filter", "")
-            upcoming_meetings = get_upcoming_meetings(meetings)
-            if selected_deadline_filter:
-                try:
-                    target_deadline = datetime.strptime(selected_deadline_filter, "%Y-%m-%d").date()
-                    upcoming_meetings = get_meetings_for_deadline(meetings, target_deadline)
-                    st.caption(f"Showing projects with deadline on {selected_deadline_filter}")
-                    if st.button("Clear deadline filter", key="clear_deadline_filter"):
-                        st.session_state.selected_deadline_filter = ""
-                        st.rerun()
-                except Exception:
-                    st.session_state.selected_deadline_filter = ""
+            sort_choice = st.selectbox(
+                "Sort upcoming projects",
+                ["Earliest deadline", "Latest deadline"],
+                key="upcoming_project_sort",
+            )
+            upcoming_meetings = get_upcoming_meetings(meetings, sort_order=sort_choice)
             if not upcoming_meetings:
                 st.info("No upcoming projects yet.")
             else:
@@ -2292,44 +2283,10 @@ if st.session_state.current_page == "Dashboard":
                 )
             selected_calendar_month_num = month_names.index(selected_calendar_month) + 1
             st.caption(f"{selected_calendar_month} {selected_calendar_year}")
-            pending_days = get_pending_deadline_days(meetings, selected_calendar_year, selected_calendar_month_num)
-            cal = calendar.Calendar(firstweekday=0)
-            day_labels = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
-            header_cols = st.columns(7)
-            for index, label in enumerate(day_labels):
-                with header_cols[index]:
-                    st.caption(label)
-            today = date.today()
-            for week_index, week in enumerate(cal.monthdayscalendar(selected_calendar_year, selected_calendar_month_num)):
-                week_cols = st.columns(7)
-                for day_index, day_num in enumerate(week):
-                    with week_cols[day_index]:
-                        if day_num == 0:
-                            st.markdown("&nbsp;", unsafe_allow_html=True)
-                        else:
-                            button_label = str(day_num)
-                            if day_num in pending_days:
-                                button_label = f"🟨 {day_num}"
-                            elif (
-                                day_num == today.day
-                                and selected_calendar_month_num == today.month
-                                and selected_calendar_year == today.year
-                            ):
-                                button_label = f"• {day_num}"
-                            if st.button(
-                                button_label,
-                                key=f"calendar_day_{selected_calendar_year}_{selected_calendar_month_num}_{day_num}_{week_index}",
-                                use_container_width=True,
-                            ):
-                                if day_num in pending_days:
-                                    st.session_state.selected_deadline_filter = date(
-                                        selected_calendar_year,
-                                        selected_calendar_month_num,
-                                        day_num,
-                                    ).isoformat()
-                                else:
-                                    st.session_state.selected_deadline_filter = ""
-                                st.rerun()
+            st.markdown(
+                build_calendar_html(meetings, selected_calendar_year, selected_calendar_month_num),
+                unsafe_allow_html=True,
+            )
             st.caption("Yellow dates show pending action deadlines.")
 
         assistant_card = st.container(border=True)
