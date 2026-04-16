@@ -458,6 +458,21 @@ def get_pending_deadline_days(meetings: list, year: int, month: int) -> set:
     return pending_days
 
 
+def get_meetings_for_deadline(meetings: list, target_date: date) -> list:
+    matched = []
+    target_text = target_date.isoformat()
+    for meeting in meetings:
+        actions = meeting.get("actions", [])
+        if not actions:
+            continue
+        if any(
+            normalize_status(action) in {"Pending", "In Progress"} and normalize_value(action.get("deadline"), "") == target_text
+            for action in actions
+        ):
+            matched.append(meeting)
+    return matched
+
+
 def build_calendar_html(meetings: list, year: int, month: int) -> str:
     cal = calendar.Calendar(firstweekday=0)
     weeks = cal.monthdayscalendar(year, month)
