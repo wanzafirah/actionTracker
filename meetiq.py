@@ -2336,20 +2336,13 @@ if st.session_state.current_page == "Dashboard":
         upcoming_card = st.container(border=True)
         with upcoming_card:
             st.markdown("### Upcoming Project")
-            use_date_filter = st.checkbox(
-                "Filter by deadline date",
-                key="upcoming_project_use_date_filter",
-            )
-            selected_deadline_date = None
-            if use_date_filter:
-                selected_deadline_date = st.date_input(
-                    "Deadline date",
-                    value=date.today(),
-                    key="upcoming_project_date_filter",
-                )
+            date_search = st.text_input(
+                "Search by deadline date",
+                key="upcoming_project_date_search",
+                placeholder="YYYY-MM-DD",
+            ).strip()
             upcoming_meetings = get_upcoming_meetings(meetings, limit=20, sort_order="Earliest deadline")
-            if selected_deadline_date:
-                target_date_text = selected_deadline_date.isoformat()
+            if date_search:
                 filtered_upcoming = []
                 for meeting in upcoming_meetings:
                     active_deadlines = []
@@ -2359,7 +2352,7 @@ if st.session_state.current_page == "Dashboard":
                         deadline = normalize_value(action.get("deadline"), "")
                         if deadline and deadline != "None":
                             active_deadlines.append(deadline)
-                    if target_date_text in active_deadlines:
+                    if date_search in active_deadlines:
                         filtered_upcoming.append(meeting)
                 upcoming_meetings = filtered_upcoming
             if not upcoming_meetings:
