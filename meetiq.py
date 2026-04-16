@@ -1335,21 +1335,23 @@ st.markdown(
     """
     <style>
     :root {
-        --bg-outer: #2d3342;
+        --bg-outer: #0E1F2F;
         --surface: #ffffff;
-        --surface-soft: #f1f5f9;
-        --border: #cbd5e1;
+        --surface-soft: #f8f6fb;
+        --border: #d8dceb;
         --text: #0f172a;
-        --text-muted: #334155;
-        --text-soft: #64748b;
-        --brand: #123a63;
-        --brand-2: #4f46e5;
-        --accent: #0f766e;
+        --text-muted: #27425D;
+        --text-soft: #6e7f96;
+        --brand: #0E1B48;
+        --brand-2: #27425D;
+        --accent: #87A7D0;
+        --soft-pink: #C18DB4;
+        --soft-blush: #E2CAD8;
     }
     .stApp {
         background:
-            radial-gradient(circle at top right, rgba(79, 70, 229, 0.12), transparent 30%),
-            radial-gradient(circle at bottom left, rgba(15, 118, 110, 0.10), transparent 35%),
+            radial-gradient(circle at top right, rgba(135, 167, 208, 0.14), transparent 30%),
+            radial-gradient(circle at bottom left, rgba(193, 141, 180, 0.18), transparent 36%),
             var(--bg-outer);
         color: var(--text);
         font-family: "Aptos", "Segoe UI", Arial, sans-serif;
@@ -1360,7 +1362,7 @@ st.markdown(
         padding: 1.25rem 1.5rem 2rem;
         margin: 1rem auto;
         max-width: 1380px;
-        background: linear-gradient(180deg, var(--surface) 0%, #fbfdff 100%);
+        background: linear-gradient(180deg, var(--surface) 0%, #fcfbfe 100%);
         border-radius: 28px;
         box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
     }
@@ -1418,7 +1420,7 @@ st.markdown(
         font-weight: 700;
     }
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #4657c8 0%, #3246af 45%, #24338d 100%);
+        background: linear-gradient(180deg, #27425D 0%, #0E1B48 52%, #0E1F2F 100%);
         border-right: 1px solid rgba(255,255,255,0.10);
     }
     section[data-testid="stSidebar"] .block-container {
@@ -1443,7 +1445,7 @@ st.markdown(
         border: 0 !important;
         font-weight: 700 !important;
         box-shadow: none !important;
-        background: rgba(255,255,255,0.12) !important;
+        background: rgba(135,167,208,0.18) !important;
         color: #ffffff !important;
         backdrop-filter: blur(4px);
     }
@@ -1498,7 +1500,7 @@ st.markdown(
     }
     .hero-badge {
         display: inline-block;
-        background: #e2e8f0;
+        background: var(--soft-blush);
         color: var(--brand);
         padding: 0.35rem 0.7rem;
         border-radius: 999px;
@@ -1530,10 +1532,10 @@ st.markdown(
     .nav-card-marker + div[data-testid="stButton"] > button {
         min-height: 168px !important;
         border-radius: 22px !important;
-        border: 1px solid #d7e3f3 !important;
+        border: 1px solid #d8dceb !important;
         background: #ffffff !important;
         color: #0f172a !important;
-        box-shadow: 0 16px 28px rgba(30, 58, 95, 0.08) !important;
+        box-shadow: 0 16px 28px rgba(14, 27, 72, 0.10) !important;
         white-space: pre-line !important;
         text-align: left !important;
         justify-content: flex-start !important;
@@ -1543,8 +1545,8 @@ st.markdown(
         line-height: 1.55 !important;
     }
     .nav-card-marker + div[data-testid="stButton"] > button:hover {
-        border-color: #9db6db !important;
-        box-shadow: 0 18px 32px rgba(79, 70, 229, 0.12) !important;
+        border-color: #87A7D0 !important;
+        box-shadow: 0 18px 32px rgba(39, 66, 93, 0.14) !important;
         color: #0f172a !important;
     }
     .completion-marker + div[data-testid="stButton"] > button {
@@ -1675,14 +1677,14 @@ st.markdown(
     }
     .chat-bubble.user {
         margin-left: auto;
-        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        background: linear-gradient(135deg, #27425D, #0E1B48);
         color: #ffffff;
-        border-color: rgba(37, 99, 235, 0.22);
+        border-color: rgba(14, 27, 72, 0.22);
         border-bottom-right-radius: 6px;
     }
     .chat-bubble.assistant {
         margin-right: auto;
-        background: #f3f4f6;
+        background: #f7f4f8;
         color: var(--text);
         border-bottom-left-radius: 6px;
     }
@@ -1700,10 +1702,10 @@ st.markdown(
         margin: 1rem 0 0.75rem;
         padding: 0.65rem 0.9rem;
         border-radius: 12px;
-        background: #dbe7f3;
+        background: #e8eef8;
         color: var(--brand);
         font-weight: 700;
-        border: 1px solid #c6d4e3;
+        border: 1px solid #cbd7eb;
     }
     .dashboard-shell {
         display: grid;
@@ -1717,10 +1719,10 @@ st.markdown(
         gap: 1rem;
     }
     .dashboard-card {
-        background: rgba(255,255,255,0.94);
+        background: rgba(255,255,255,0.96);
         border: 1px solid var(--border);
         border-radius: 22px;
-        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+        box-shadow: 0 16px 32px rgba(14, 27, 72, 0.08);
         padding: 1rem 1.05rem;
     }
     .dashboard-title {
@@ -1738,8 +1740,8 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 0.8rem;
-        background: #f8fbff;
-        border: 1px solid #d8e2f1;
+        background: #f6f4f8;
+        border: 1px solid #ddd5e5;
         border-radius: 18px;
         padding: 0.55rem 0.85rem;
         margin-bottom: 1rem;
@@ -1778,17 +1780,17 @@ st.markdown(
         border-radius: 16px;
         display: grid;
         place-items: center;
-        background: #f3f6fb;
+        background: #f5f6fa;
         color: var(--text);
         font-weight: 700;
-        border: 1px solid #e2e8f0;
+        border: 1px solid #dbe2ed;
     }
     .calendar-day.empty {
         background: transparent;
         border-color: transparent;
     }
     .calendar-day.today {
-        background: #1e3a5f;
+        background: var(--brand);
         color: #ffffff;
     }
     .calendar-day.pending-deadline {
@@ -1805,8 +1807,8 @@ st.markdown(
     .upcoming-item {
         padding: 0.85rem 0.95rem;
         border-radius: 16px;
-        background: #f8fbff;
-        border: 1px solid #d8e2f1;
+        background: #f8f6fb;
+        border: 1px solid #ddd5e5;
         margin-top: 0.7rem;
     }
     .upcoming-top {
@@ -1819,8 +1821,8 @@ st.markdown(
         min-width: 74px;
         padding: 0.45rem 0.55rem;
         border-radius: 14px;
-        background: linear-gradient(135deg, #e0e7ff, #dbeafe);
-        color: #1e3a5f;
+        background: linear-gradient(135deg, #E2CAD8, #87A7D0);
+        color: var(--brand);
         text-align: center;
         font-weight: 800;
         font-size: 0.82rem;
@@ -1829,8 +1831,8 @@ st.markdown(
         padding: 0.95rem 1rem;
         border-radius: 18px;
         background: #ffffff;
-        border: 1px solid #dbe4f0;
-        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        border: 1px solid #ddd5e5;
+        box-shadow: 0 10px 22px rgba(14, 27, 72, 0.06);
         margin-bottom: 0.85rem;
     }
     .search-result-top {
@@ -1844,8 +1846,8 @@ st.markdown(
         white-space: nowrap;
         padding: 0.3rem 0.7rem;
         border-radius: 999px;
-        background: #eef2ff;
-        color: #3730a3;
+        background: var(--soft-blush);
+        color: var(--brand);
         font-size: 0.8rem;
         font-weight: 700;
     }
@@ -1861,9 +1863,9 @@ st.markdown(
     }
     .completion-card {
         background: #ffffff;
-        border: 1px solid #d9e2ec;
+        border: 1px solid #ddd5e5;
         border-radius: 16px;
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+        box-shadow: 0 10px 24px rgba(14, 27, 72, 0.06);
         padding: 1rem 1.05rem;
         min-height: 108px;
     }
@@ -1877,7 +1879,7 @@ st.markdown(
         width: var(--size);
         height: var(--size);
         border-radius: 50%;
-        background: conic-gradient(#d9ff57 calc(var(--pct) * 1%), #eef2f7 0);
+        background: conic-gradient(#87A7D0 calc(var(--pct) * 1%), #edf1f7 0);
         display: grid;
         place-items: center;
         box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05);
@@ -1891,7 +1893,7 @@ st.markdown(
         place-items: center;
         font-size: 1.2rem;
         font-weight: 800;
-        color: #4f46e5;
+        color: var(--brand);
     }
     @media (max-width: 980px) {
         .dashboard-shell {
