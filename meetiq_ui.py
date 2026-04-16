@@ -1,7 +1,17 @@
 import streamlit as st
 
 from meetiq_constants import STATUS_CFG, STATUSES
-from meetiq_utils import extract_entity_names, normalize_status, normalize_value, pill, pretty_deadline
+from meetiq_utils import normalize_status, normalize_value, pill, pretty_deadline
+
+
+def _entity_text(item) -> str:
+    if isinstance(item, dict):
+        for key in ("text", "name", "title", "value"):
+            value = item.get(key)
+            if value:
+                return str(value).strip()
+        return ""
+    return str(item).strip()
 
 
 def render_kpi_card(title: str, value: str, subtitle: str, accent: str) -> None:
@@ -76,7 +86,7 @@ def render_chat_bubble(role: str, text: str) -> None:
 
 def render_summary_panel(result: dict) -> None:
     nlp = result.get("nlp_pipeline", {})
-    people_count = len(extract_entity_names(nlp.get("named_entities", {}).get("persons", [])))
+    people_count = len([text for item in nlp.get("named_entities", {}).get("persons", []) if (text := _entity_text(item))])
     action_count = len(result.get("action_items", []))
     decision_count = len(result.get("key_decisions", []))
     st.markdown(
