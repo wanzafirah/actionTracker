@@ -420,24 +420,38 @@ def add_month_columns(df: pd.DataFrame, date_column: str) -> pd.DataFrame:
     return output
 
 
-def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
-    dated_meetings = []
+def get_upcoming_meetings(meetings: list, limit: int = 4, sort_order: str = "Earliest deadline") -> list:
+    candidates = []
     for meeting in meetings:
         actions = meeting.get("actions", [])
-        if not actions:
+        active_actions = [action for action in actions if normalize_status(action) in {"Pending", "In Progress"}]
+        if not active_actions:
             continue
-        if not any(normalize_status(action) in {"Pending", "In Progress"} for action in actions):
-            continue
-        try:
-            meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
-            dated_meetings.append((meeting_date, meeting))
-        except Exception:
-            continue
-    upcoming = [item for item in dated_meetings if item[0] >= date.today()]
-    selected = sorted(upcoming, key=lambda item: item[0])[:limit]
-    if not selected:
-        selected = sorted(dated_meetings, key=lambda item: item[0], reverse=True)[:limit]
-    return [meeting for _, meeting in selected]
+
+        deadlines = []
+        for action in active_actions:
+            deadline = normalize_value(action.get("deadline"), "")
+            if not deadline or deadline == "None":
+                continue
+            try:
+                deadlines.append(datetime.strptime(str(deadline), "%Y-%m-%d").date())
+            except Exception:
+                continue
+
+        if deadlines:
+            deadline_key = min(deadlines)
+        else:
+            meeting_date_text = normalize_value(meeting.get("date"), "")
+            try:
+                deadline_key = datetime.strptime(str(meeting_date_text), "%Y-%m-%d").date()
+            except Exception:
+                deadline_key = date.max if sort_order == "Earliest deadline" else date.min
+
+        candidates.append((deadline_key, meeting))
+
+    reverse = sort_order == "Latest deadline"
+    ordered = sorted(candidates, key=lambda item: item[0], reverse=reverse)
+    return [meeting for _, meeting in ordered[:limit]]
 
 
 def get_pending_deadline_days(meetings: list, year: int, month: int) -> set:
