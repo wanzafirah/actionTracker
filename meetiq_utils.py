@@ -345,7 +345,7 @@ def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
         actions = meeting.get("actions", [])
         if not actions:
             continue
-        if not any(normalize_status(action) == "Pending" for action in actions):
+        if not any(normalize_status(action) in {"Pending", "In Progress"} for action in actions):
             continue
         try:
             meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
