@@ -2,6 +2,7 @@ import json
 import os
 import re
 import calendar
+import ast
 from datetime import date, datetime
 
 import pandas as pd
@@ -958,6 +959,12 @@ def extract_json(raw: str) -> dict:
     def try_load(candidate: str) -> dict:
         return json.loads(candidate)
 
+    def try_literal(candidate: str) -> dict:
+        parsed = ast.literal_eval(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError("Recovered content is not a dictionary")
+
     try:
         return try_load(cleaned)
     except json.JSONDecodeError:
@@ -969,17 +976,29 @@ def extract_json(raw: str) -> dict:
                 lambda m: f"{m.group(1)}{json.dumps(m.group(2).strip())}",
                 text,
             )
+            quote_bare_keys = lambda text: re.sub(
+                r'([{\s,])([A-Za-z_][A-Za-z0-9_\- ]*)(\s*:)',
+                lambda m: f'{m.group(1)}"{m.group(2).strip()}"{m.group(3)}',
+                text,
+            )
             repairs = [
                 candidate,
                 re.sub(r",\s*([}\]])", r"\1", candidate),
                 quote_bare_values(candidate),
                 re.sub(r",\s*([}\]])", r"\1", quote_bare_values(candidate)),
+                quote_bare_keys(candidate),
+                re.sub(r",\s*([}\]])", r"\1", quote_bare_keys(candidate)),
+                quote_bare_values(quote_bare_keys(candidate)),
+                re.sub(r",\s*([}\]])", r"\1", quote_bare_values(quote_bare_keys(candidate))),
             ]
             for repaired in repairs:
                 try:
                     return try_load(repaired)
                 except json.JSONDecodeError:
-                    continue
+                    try:
+                        return try_literal(repaired)
+                    except Exception:
+                        continue
         raise
 
 
