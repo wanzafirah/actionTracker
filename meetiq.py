@@ -988,8 +988,8 @@ def recover_json_with_ollama(raw: str) -> dict:
         "You repair malformed meeting-analysis JSON. "
         "Return only valid JSON with the same meaning. No markdown, no explanation."
     )
-    repair_prompt = f"Fix this into valid JSON only:\n\n{raw[:4000]}"
-    repaired = call_ollama(repair_system, repair_prompt, max_tokens=300)
+    repair_prompt = f"Fix this into valid JSON only:\n\n{raw[:2500]}"
+    repaired = call_ollama(repair_system, repair_prompt, max_tokens=150)
     return extract_json(repaired)
 
 
