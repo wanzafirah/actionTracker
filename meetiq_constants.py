@@ -83,7 +83,7 @@ ACTIVITY_CATEGORY_OPTIONS = [
 ROLE_OPTIONS = ["Organiser", "Guest / Attendees", "Speaker", "Moderator", "Panel", "Auditor"]
 MAIN_ACTIVITY_OPTIONS = ["Yes", "No"]
 LINK_PHOTO_OPTIONS = ["refer to COMMS repository of photos", "Insert link", "No Photo"]
-ACTIVITY_TYPE_OPTIONS = ["Virtual", "Physical", "Both"]
+ACTIVITY_TYPE_OPTIONS = ["None", "Virtual", "Physical", "Both"]
 ORGANIZATION_TYPE_OPTIONS = ["Institution", "Company"]
 REPRESENTATIVE_POSITION_OPTIONS = [
     "GROUP CHIEF EXECUTIVE OFFICER",
