@@ -1012,6 +1012,78 @@ def recover_json_with_ollama(raw: str) -> dict:
     return extract_json(repaired)
 
 
+def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) -> dict:
+    metadata = metadata or {}
+    discussion_points = fallback_discussion_points(transcript)
+    key_decisions = fallback_key_decisions(transcript)
+    title = normalize_value(metadata.get("Title"), "") or normalize_value(metadata.get("Activity Title"), "") or "Untitled"
+    meeting_type = normalize_value(metadata.get("Activity Type"), "") or "Not Provided"
+    category = normalize_value(metadata.get("Category"), "") or "Not Provided"
+    objective = discussion_points[0] if discussion_points else "Objective not clearly extracted."
+    summary_sentences = transcript_sentences(transcript)[:3]
+    summary = " ".join(summary_sentences).strip() or "Summary could not be generated from the transcript."
+    return {
+        "title": title,
+        "meeting_type": meeting_type,
+        "category": category,
+        "nlp_pipeline": {
+            "token_count": 0,
+            "sentence_count": len(transcript_sentences(transcript)),
+            "named_entities": {
+                "persons": [],
+                "organizations": [],
+                "dates": [],
+                "locations": [],
+            },
+        },
+        "classification": {
+            "action_items_count": 0,
+            "decisions_count": len(key_decisions),
+            "discussion_points_count": len(discussion_points),
+        },
+        "objective": objective,
+        "summary": summary,
+        "outcome": "Not provided",
+        "follow_up": False,
+        "follow_up_reason": "",
+        "key_decisions": key_decisions,
+        "discussion_points": discussion_points,
+        "action_items": [],
+        "estimated_budget": 0,
+        "budget_notes": "",
+    }
+
+
+def normalize_pipeline_result(result: dict, transcript: str, metadata: dict | None = None) -> dict:
+    safe = build_safe_pipeline_result(transcript, metadata)
+    if not isinstance(result, dict):
+        return safe
+    merged = safe | result
+    merged["nlp_pipeline"] = {
+        **safe["nlp_pipeline"],
+        **(result.get("nlp_pipeline", {}) if isinstance(result.get("nlp_pipeline", {}), dict) else {}),
+    }
+    safe_entities = safe["nlp_pipeline"]["named_entities"]
+    result_entities = merged["nlp_pipeline"].get("named_entities", {})
+    merged["nlp_pipeline"]["named_entities"] = {
+        **safe_entities,
+        **(result_entities if isinstance(result_entities, dict) else {}),
+    }
+    merged["classification"] = {
+        **safe["classification"],
+        **(result.get("classification", {}) if isinstance(result.get("classification", {}), dict) else {}),
+    }
+    for key in ("key_decisions", "discussion_points", "action_items"):
+        if not isinstance(merged.get(key), list):
+            merged[key] = safe[key]
+    for key in ("title", "meeting_type", "category", "objective", "summary", "outcome", "budget_notes"):
+        merged[key] = normalize_value(merged.get(key), safe[key])
+    merged["estimated_budget"] = merged.get("estimated_budget", 0) or 0
+    merged["follow_up"] = parse_yes_no(merged.get("follow_up"))
+    merged["follow_up_reason"] = normalize_value(merged.get("follow_up_reason"), "")
+    return merged
+
+
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
     cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=800)
     objective_only = is_objective_only_transcript(cleaned_transcript)
@@ -1036,8 +1108,12 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
     raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
     try:
         result = extract_json(raw)
-    except json.JSONDecodeError:
-        result = recover_json_with_ollama(raw)
+    except Exception:
+        try:
+            result = recover_json_with_ollama(raw)
+        except Exception:
+            result = build_safe_pipeline_result(cleaned_transcript, metadata)
+    result = normalize_pipeline_result(result, cleaned_transcript, metadata)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
         result["follow_up"] = True
