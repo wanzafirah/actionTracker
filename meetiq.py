@@ -1715,7 +1715,7 @@ with st.sidebar:
     st.markdown(
         """
         <div class="sidebar-title">AI-Powered Meeting Insight Generator &amp; Action Tracker</div>
-        <div class="sidebar-subtitle">for Talentcorp by z</div>
+        <div class="sidebar-subtitle">for Talentcorp by Zaf &lt;3</div>
         """,
         unsafe_allow_html=True,
     )
@@ -1969,45 +1969,65 @@ if st.session_state.current_page == "Capture":
         result["title"] = result.get("title") or pending.get("activity_title", "Untitled")
         render_summary_panel(result)
 
+        def parse_preview_list(value: str) -> list:
+            items = []
+            for line in (value or "").splitlines():
+                cleaned = line.strip().lstrip("-").lstrip("•").strip()
+                if cleaned:
+                    items.append(cleaned)
+            return items
+
         insight_col, entity_col = st.columns([1.2, 0.8])
         with insight_col:
             st.markdown("### Decisions & Discussion")
-            decisions = result.get("key_decisions", [])
-            discussions = result.get("discussion_points", [])
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="mini-title">Key Decisions</div>
-                    <div class="mini-copy">{html_lines(decisions, 'No decisions extracted.')}</div>
-                </div>
-                <div class="info-card">
-                    <div class="mini-title">Discussion Points</div>
-                    <div class="mini-copy">{html_lines(discussions, 'No discussion points extracted.')}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            decisions_text = st.text_area(
+                "Key Decisions",
+                value="\n".join(normalize_value(item, "") for item in result.get("key_decisions", [])),
+                key="preview_key_decisions",
+                height=120,
+                placeholder="Add one decision per line",
             )
+            discussions_text = st.text_area(
+                "Discussion Points",
+                value="\n".join(normalize_value(item, "") for item in result.get("discussion_points", [])),
+                key="preview_discussion_points",
+                height=180,
+                placeholder="Add one discussion point per line",
+            )
+            result["key_decisions"] = parse_preview_list(decisions_text)
+            result["discussion_points"] = parse_preview_list(discussions_text)
 
         with entity_col:
             entities = result.get("nlp_pipeline", {}).get("named_entities", {})
             st.markdown("### Meeting Metadata")
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="mini-title">People</div>
-                    <div class="mini-copy">{render_entity_list(entities.get('persons', []))}</div>
-                </div>
-                <div class="info-card">
-                    <div class="mini-title">Organizations</div>
-                    <div class="mini-copy">{render_entity_list(entities.get('organizations', []))}</div>
-                </div>
-                <div class="info-card">
-                    <div class="mini-title">Dates & Locations</div>
-                    <div class="mini-copy">{render_entity_list(entities.get('dates', []))} | {render_entity_list(entities.get('locations', []))}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            people_text = st.text_area(
+                "People",
+                value="\n".join(extract_entity_names(entities.get("persons", []))),
+                key="preview_people",
+                height=100,
+                placeholder="Add one person per line",
             )
+            organizations_text = st.text_area(
+                "Organizations",
+                value="\n".join(extract_entity_names(entities.get("organizations", []))),
+                key="preview_organizations",
+                height=100,
+                placeholder="Add one organization per line",
+            )
+            dates_text = st.text_area(
+                "Date",
+                value="\n".join(extract_entity_names(entities.get("dates", []))),
+                key="preview_dates",
+                height=100,
+                placeholder="Add one date per line",
+            )
+            entities["persons"] = parse_preview_list(people_text)
+            entities["organizations"] = parse_preview_list(organizations_text)
+            entities["dates"] = parse_preview_list(dates_text)
+            entities["locations"] = []
+            result.setdefault("nlp_pipeline", {})
+            result["nlp_pipeline"].setdefault("named_entities", {})
+            result["nlp_pipeline"]["named_entities"] = entities
 
         st.markdown("### Action Plan")
         actions = result.get("action_items", [])
