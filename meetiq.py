@@ -2065,14 +2065,16 @@ if st.session_state.current_page == "Dashboard":
         actions = meeting.get("actions", [])
         if not actions:
             return "Completed"
-        open_statuses = {"Pending", "In Progress", "Overdue"}
-        if any(normalize_status(action) in open_statuses for action in actions):
+        statuses = [normalize_status(action) for action in actions]
+        if "Overdue" in statuses:
+            return "Overdue"
+        if any(status in {"Pending", "In Progress"} for status in statuses):
             return "Pending"
         return "Completed"
 
     dashboard_meeting_records = [{"meeting": meeting, "status": meeting_dashboard_status(meeting)} for meeting in meetings]
     done_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Completed")
-    open_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Pending")
+    pending_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Pending")
     completion_pct = round((done_count / len(dashboard_meeting_records)) * 100) if dashboard_meeting_records else 0
 
     dashboard_left, dashboard_right = st.columns([1.35, 0.85])
@@ -2084,7 +2086,7 @@ if st.session_state.current_page == "Dashboard":
             with c1:
                 render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_card("Open Tasks", str(open_count), "Meetings with open actions", "#d97706")
+                render_kpi_card("Pending", str(pending_count), "Pending meetings", "#d97706")
             with c3:
                 render_kpi_card("Done", str(done_count), "Closed or no-action meetings", "#16a34a")
             with c4:
@@ -2172,8 +2174,10 @@ if st.session_state.current_page == "Tracker":
         actions = meeting.get("actions", [])
         if not actions:
             return "Completed"
-        open_statuses = {"Pending", "In Progress", "Overdue"}
-        if any(normalize_status(action) in open_statuses for action in actions):
+        statuses = [normalize_status(action) for action in actions]
+        if "Overdue" in statuses:
+            return "Overdue"
+        if any(status in {"Pending", "In Progress"} for status in statuses):
             return "Pending"
         return "Completed"
 
@@ -2217,7 +2221,7 @@ if st.session_state.current_page == "Tracker":
     with c1:
         render_kpi_card("Saved Meetings", str(len(meeting_records)), "Stored records", "#0f766e")
     with c2:
-        render_kpi_card("Pending", str(sum(1 for record in meeting_records if record["status"] == "Pending")), "Meetings with open actions", "#d97706")
+        render_kpi_card("Pending", str(sum(1 for record in meeting_records if record["status"] == "Pending")), "Pending meetings", "#d97706")
     with c3:
         render_kpi_card("Completed", str(sum(1 for record in meeting_records if record["status"] == "Completed")), "Closed or no-action meetings", "#16a34a")
     with c4:
@@ -2236,7 +2240,7 @@ if st.session_state.current_page == "Tracker":
             key="tracker_meeting_search",
         )
     with filt_right:
-        status_options = ["All", "Pending", "Completed"]
+        status_options = ["All", "Pending", "Overdue", "Completed"]
         status_index = status_options.index(status_default) if status_default in status_options else 0
         meeting_status_filter = st.selectbox("Meeting Status", status_options, index=status_index, key="tracker_meeting_status")
 
@@ -2269,8 +2273,8 @@ if st.session_state.current_page == "Tracker":
         for record in filtered_meetings:
             meeting = record["meeting"]
             status_text = record["status"]
-            status_cfg = {"Pending": "#d97706", "Completed": "#16a34a"}
-            subtitle = "Open action items" if status_text == "Pending" else "No pending action items"
+            status_cfg = {"Pending": "#d97706", "Overdue": "#dc2626", "Completed": "#16a34a"}
+            subtitle = "Pending meetings" if status_text == "Pending" else ("Past deadline meetings" if status_text == "Overdue" else "No pending action items")
             header = f"{record['title']} | {record['meeting_id'] or 'No ID'} | {normalize_value(meeting.get('date'), 'No date')}"
             with st.expander(header):
                 top_left, top_right = st.columns([1.35, 0.65])
