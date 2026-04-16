@@ -102,12 +102,19 @@ def dataframe_to_meeting_text(frame: pd.DataFrame, row_limit: int = 40) -> str:
 
 def extract_text_from_document(uploaded_file) -> str:
     file_name = getattr(uploaded_file, "name", "document").lower()
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
     if file_name.endswith(".pdf"):
         if PdfReader is None:
             raise RuntimeError("PDF support requires `pypdf`. Install it with `pip install pypdf`.")
         reader = PdfReader(uploaded_file)
         pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n".join(page.strip() for page in pages if page.strip())
+        extracted = "\n".join(page.strip() for page in pages if page.strip())
+        if not extracted.strip():
+            raise RuntimeError(
+                "This PDF has no selectable text. It may be a scanned/image PDF, so the app cannot read it directly."
+            )
+        return extracted
     if file_name.endswith(".docx"):
         if Document is None:
             raise RuntimeError("Word support requires `python-docx`. Install it with `pip install python-docx`.")
