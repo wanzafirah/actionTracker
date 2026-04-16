@@ -1174,8 +1174,83 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
 
 
 def chat_with_meetings(question: str, meetings: list) -> str:
+    question_lower = question.lower().strip()
+    question_tokens = {
+        token
+        for token in re.findall(r"[a-zA-Z0-9&]+", question_lower)
+        if len(token) >= 3 and token not in {
+            "what",
+            "when",
+            "where",
+            "which",
+            "there",
+            "their",
+            "about",
+            "with",
+            "from",
+            "have",
+            "that",
+            "this",
+            "item",
+            "items",
+            "task",
+            "tasks",
+            "action",
+            "actions",
+            "meeting",
+            "meetings",
+        }
+    }
+
+    def meeting_search_blob(meeting: dict) -> str:
+        return " ".join(
+            [
+                normalize_value(meeting.get("title"), ""),
+                normalize_value(meeting.get("summary"), ""),
+                normalize_value(meeting.get("outcome"), ""),
+                normalize_value(meeting.get("meetingID"), ""),
+                normalize_value(meeting.get("activityId"), ""),
+                join_list(meeting.get("stakeholders", []), ""),
+                join_list(meeting.get("companies", []), ""),
+                join_list(meeting.get("discussionPoints", []), ""),
+                join_list(meeting.get("keyDecisions", []), ""),
+            ]
+        ).lower()
+
+    scored_meetings = []
+    for meeting in meetings:
+        blob = meeting_search_blob(meeting)
+        score = sum(1 for token in question_tokens if token in blob)
+        if score > 0:
+            scored_meetings.append((score, meeting))
+
+    relevant_meetings = [meeting for _, meeting in sorted(scored_meetings, key=lambda item: item[0], reverse=True)]
+    if not relevant_meetings:
+        relevant_meetings = meetings[:5]
+
+    action_question = any(
+        keyword in question_lower
+        for keyword in ["action", "task", "deadline", "owner", "pending", "follow up", "follow-up"]
+    )
+
+    if action_question and relevant_meetings:
+        top_meeting = relevant_meetings[0]
+        top_title = normalize_value(top_meeting.get("title"), "this meeting")
+        active_actions = top_meeting.get("actions", [])
+        if active_actions:
+            lines = [
+                f"For the meeting \"{top_title}\", the action items are:"
+            ]
+            for action in active_actions:
+                lines.append(
+                    f"- {normalize_value(action.get('text'))} | owner: {normalize_value(action.get('owner'), 'Not stated')} | "
+                    f"status: {normalize_status(action)} | deadline: {normalize_value(action.get('deadline'), 'None')}"
+                )
+            return "\n".join(lines)
+        return f'There is no action item mentioned in the meeting data for "{top_title}".'
+
     meeting_blocks = []
-    for meeting in meetings[:5]:
+    for meeting in relevant_meetings[:5]:
         actions = meeting.get("actions", [])
         action_lines = [
             f"- {normalize_value(action.get('text'))} | owner: {normalize_value(action.get('owner'), 'Not stated')} | "
@@ -1210,7 +1285,7 @@ RULES:
 - Be concise, practical, and business-friendly.
 """
     user_msg = f"Meeting data:\n{ctx}\n\nQuestion: {question}"
-    return call_ollama(system, user_msg, max_tokens=220)
+    return call_ollama(system, user_msg, max_tokens=260)
 
 
 # ============================================================
