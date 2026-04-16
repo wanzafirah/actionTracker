@@ -983,6 +983,16 @@ def extract_json(raw: str) -> dict:
         raise
 
 
+def recover_json_with_ollama(raw: str) -> dict:
+    repair_system = (
+        "You repair malformed meeting-analysis JSON. "
+        "Return only valid JSON with the same meaning. No markdown, no explanation."
+    )
+    repair_prompt = f"Fix this into valid JSON only:\n\n{raw[:4000]}"
+    repaired = call_ollama(repair_system, repair_prompt, max_tokens=300)
+    return extract_json(repaired)
+
+
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
     cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=800)
     objective_only = is_objective_only_transcript(cleaned_transcript)
@@ -1005,7 +1015,10 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         f"Meeting content:\n{cleaned_transcript}"
     )
     raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
-    result = extract_json(raw)
+    try:
+        result = extract_json(raw)
+    except json.JSONDecodeError:
+        result = recover_json_with_ollama(raw)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
         result["follow_up"] = True
