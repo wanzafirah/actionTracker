@@ -342,7 +342,10 @@ def add_month_columns(df: pd.DataFrame, date_column: str) -> pd.DataFrame:
 def get_upcoming_meetings(meetings: list, limit: int = 4) -> list:
     dated_meetings = []
     for meeting in meetings:
-        if not meeting.get("actions"):
+        actions = meeting.get("actions", [])
+        if not actions:
+            continue
+        if not any(normalize_status(action) == "Pending" for action in actions):
             continue
         try:
             meeting_date = datetime.strptime(str(meeting.get("date", "")), "%Y-%m-%d").date()
