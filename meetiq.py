@@ -48,6 +48,7 @@ from meetiq_utils import (
     extract_entity_names,
     fallback_discussion_points,
     fallback_key_decisions,
+    fallback_action_items,
     filter_talentcorp_actions,
     first_nonempty,
     generate_activity_id,
@@ -1135,6 +1136,8 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
 
     result["follow_up_reason"] = ""
     filtered_actions = filter_talentcorp_actions(result.get("action_items", []))
+    if not filtered_actions and not objective_only:
+        filtered_actions = fallback_action_items(cleaned_transcript)
     result["action_items"] = filtered_actions
     result.setdefault("classification", {})
     result["classification"]["action_items_count"] = len(filtered_actions)
