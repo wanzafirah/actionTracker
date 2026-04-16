@@ -17,10 +17,43 @@ def today_str() -> str:
     return date.today().isoformat()
 
 
-def generate_activity_id(category: str, meeting_date: date) -> str:
-    category_clean = re.sub(r"[^A-Z]", "", category.upper())
-    prefix = category_clean[:3] if category_clean else "ACT"
-    return f"{prefix}-{meeting_date.strftime('%Y%m%d')}-{uuid4().hex[:4].upper()}"
+def meeting_id_prefix(category: str) -> str:
+    category_text = str(category or "").strip().lower()
+    mapping = {
+        "external meeting": "EX",
+        "internal meeting": "IN",
+        "workshop": "WS",
+        "event": "EV",
+    }
+    if category_text in mapping:
+        return mapping[category_text]
+    cleaned = re.sub(r"[^A-Z]", "", str(category or "").upper())
+    return cleaned[:2] if cleaned else "MT"
+
+
+def generate_activity_id(category: str, meeting_date: date, meetings: list | None = None) -> str:
+    prefix = meeting_id_prefix(category)
+    year_text = str(meeting_date.year)
+    next_number = 1
+    if meetings:
+        pattern = re.compile(rf"^{re.escape(prefix)}-{re.escape(year_text)}-(\d{{3}})$")
+        existing_numbers = []
+        for meeting in meetings:
+            candidate = str(
+                meeting.get("meetingID")
+                or meeting.get("activityId")
+                or meeting.get("id")
+                or ""
+            ).strip()
+            matched = pattern.match(candidate)
+            if matched:
+                try:
+                    existing_numbers.append(int(matched.group(1)))
+                except Exception:
+                    continue
+        if existing_numbers:
+            next_number = max(existing_numbers) + 1
+    return f"{prefix}-{year_text}-{next_number:03d}"
 
 
 def days_left(deadline: str):
