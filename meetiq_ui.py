@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 import streamlit as st
 
 from meetiq_constants import STATUS_CFG, STATUSES
@@ -73,10 +75,35 @@ def render_action_card(action: dict, editable: bool = False, persist_callback=No
             key=f"status_{action['id']}",
             label_visibility="collapsed",
         )
+        deadline_value = normalize_value(action.get("deadline"), "")
+        no_deadline_default = deadline_value in ("", "None")
+        no_deadline = st.checkbox(
+            "No deadline",
+            value=no_deadline_default,
+            key=f"no_deadline_{action['id']}",
+        )
+        default_deadline = date.today()
+        if not no_deadline_default:
+            try:
+                default_deadline = datetime.strptime(deadline_value, "%Y-%m-%d").date()
+            except Exception:
+                default_deadline = date.today()
+        edited_deadline = st.date_input(
+            "Deadline",
+            value=default_deadline,
+            key=f"deadline_{action['id']}",
+            disabled=no_deadline,
+        )
+        new_deadline = "None" if no_deadline else edited_deadline.isoformat()
+        changed = False
         if new_status != current:
             action["status"] = new_status
-            if persist_callback:
-                persist_callback()
+            changed = True
+        if new_deadline != normalize_value(action.get("deadline"), "None"):
+            action["deadline"] = new_deadline
+            changed = True
+        if changed and persist_callback:
+            persist_callback()
 
 
 def render_chat_bubble(role: str, text: str) -> None:
