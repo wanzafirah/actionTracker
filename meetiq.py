@@ -1755,46 +1755,36 @@ if st.session_state.current_page == "Capture":
     with activity_box:
         st.markdown("### Activity Details")
         act_left, act_right = st.columns(2)
+        dept_names = get_department_options()
         with act_left:
-            activity_category = st.selectbox("Category", ACTIVITY_CATEGORY_OPTIONS, key="capture_activity_category")
             activity_id = st.text_input("Activity ID", key="capture_activity_id", placeholder="Generate or enter activity ID")
             st.button("Generate Activity ID", key="generate_activity_id_btn", on_click=set_generated_activity_id)
             st.button("Clear Activity ID", key="clear_activity_id_btn", on_click=clear_generated_activity_id)
-            district = st.text_input("District", key="capture_district", placeholder="Enter district if available")
-            invitation_from = st.text_input("Invitation From", key="capture_invitation_from", placeholder="Who invited this meeting?")
-            location_meeting = st.text_input("Location Meeting", key="capture_location_meeting", placeholder="Meeting location")
-            other_reps = st.text_input("Other Reps", key="capture_other_reps", placeholder="Other representatives or attendees")
-        with act_right:
             activity_title = st.text_input("Title", key="capture_activity_title", placeholder="Enter meeting or activity title")
-            role = st.selectbox("Role", ROLE_OPTIONS, key="capture_role")
-            main_activity = st.selectbox("Main Activity", MAIN_ACTIVITY_OPTIONS, key="capture_main_activity")
-            link_photo = st.selectbox("Attach File", LINK_PHOTO_OPTIONS, key="capture_link_photo")
-            link_photo_url = ""
-            if link_photo == "Insert link":
-                link_photo_url = st.text_input(
-                    "Attachment Link",
-                    key="capture_link_photo_url",
-                    placeholder="Paste the photo URL here",
-                )
             activity_type = st.selectbox("Activity Type", ACTIVITY_TYPE_OPTIONS, key="capture_activity_type")
-            organization_type = st.selectbox("Organization Type", ORGANIZATION_TYPE_OPTIONS, key="capture_organization_type")
-            date_from = st.date_input("Date From", value=date.today(), key="capture_date_from")
-            date_to = st.date_input("Date To", value=date.today(), key="capture_date_to")
-            actual_cost = st.number_input("Actual Cost (RM)", min_value=0.0, step=50.0)
-            dept_names = get_department_options()
-            dept_choice = st.selectbox("Department", dept_names)
+        with act_right:
             meeting_date = st.date_input("Meeting Date", value=date.today())
-            st.markdown("### SLT Representative Details")
-            representative_position = st.selectbox("Representative Position", REPRESENTATIVE_POSITION_OPTIONS, key="capture_representative_position")
-            representative_name = st.text_input("Representative Name", key="capture_representative_name", placeholder="Enter representative name")
-            representative_department = st.text_input(
-                "Representative Department",
-                value=dept_choice if dept_choice != dept_names[0] else "",
-                key="capture_representative_department",
-            )
-            stfemail = st.text_input("Staff Email", key="capture_stfemail", placeholder="Staff email")
-            supemail = st.text_input("Supervisor Email", key="capture_supemail", placeholder="Supervisor email")
-            updated_by = st.text_input("Updated By", key="capture_updated_by", placeholder="Last updated by")
+            actual_cost = st.number_input("Actual Cost (RM)", min_value=0.0, step=50.0)
+            dept_choice = st.selectbox("Department", dept_names)
+
+    activity_category = ""
+    role = ""
+    main_activity = ""
+    link_photo = ""
+    link_photo_url = ""
+    organization_type = ""
+    date_from = meeting_date
+    date_to = meeting_date
+    district = ""
+    invitation_from = ""
+    location_meeting = ""
+    other_reps = ""
+    representative_position = ""
+    representative_name = ""
+    representative_department = ""
+    stfemail = ""
+    supemail = ""
+    updated_by = ""
 
     transcript_box = st.container(border=True)
     with transcript_box:
@@ -1881,7 +1871,7 @@ if st.session_state.current_page == "Capture":
             st.button("Clear Input", key="capture_clear_btn", on_click=clear_capture_inputs, use_container_width=True)
 
     resolved_activity_id = st.session_state.capture_activity_id.strip() or generate_activity_id(
-        activity_category or activity_type or "ACT",
+        activity_type or "ACT",
         date.today(),
     )
 
