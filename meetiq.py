@@ -1232,6 +1232,19 @@ def chat_with_meetings(question: str, meetings: list) -> str:
         keyword in question_lower
         for keyword in ["action", "task", "deadline", "owner", "pending", "follow up", "follow-up"]
     )
+    about_question = any(
+        phrase in question_lower
+        for phrase in [
+            "about",
+            "summary",
+            "objective",
+            "what is the meeting",
+            "what was the meeting",
+            "topic",
+            "agenda",
+            "discuss",
+        ]
+    )
 
     if action_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
@@ -1248,6 +1261,30 @@ def chat_with_meetings(question: str, meetings: list) -> str:
                 )
             return "\n".join(lines)
         return f'There is no action item mentioned in the meeting data for "{top_title}".'
+
+    if about_question and relevant_meetings:
+        top_meeting = relevant_meetings[0]
+        top_title = normalize_value(top_meeting.get("title"), "this meeting")
+        summary = normalize_value(top_meeting.get("summary"), "")
+        objective = normalize_value(top_meeting.get("objective"), "")
+        discussions = load_text_list(top_meeting.get("discussionPoints", []))
+
+        parts = [f'The meeting "{top_title}" is about:']
+        if summary and summary != "None":
+            parts.append(summary)
+        elif objective and objective != "None":
+            parts.append(objective)
+        elif discussions:
+            parts.append("Main discussion points included:")
+            parts.extend(f"- {item}" for item in discussions[:3])
+        else:
+            parts.append("No clear summary was saved for this meeting yet.")
+
+        outcome = normalize_value(top_meeting.get("outcome"), "")
+        if outcome and outcome != "None" and outcome.lower() != "not provided":
+            parts.append(f"Outcome: {outcome}")
+
+        return "\n".join(parts)
 
     meeting_blocks = []
     for meeting in relevant_meetings[:5]:
