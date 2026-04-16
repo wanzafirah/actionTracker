@@ -2336,14 +2336,27 @@ if st.session_state.current_page == "Dashboard":
         upcoming_card = st.container(border=True)
         with upcoming_card:
             st.markdown("### Upcoming Project")
-            sort_choice = st.selectbox(
-                "Sort upcoming projects",
-                ["Earliest deadline", "Latest deadline"],
-                key="upcoming_project_sort",
-            )
-            upcoming_meetings = get_upcoming_meetings(meetings, sort_order=sort_choice)
+            date_search = st.text_input(
+                "Search by deadline date",
+                key="upcoming_project_date_search",
+                placeholder="YYYY-MM-DD",
+            ).strip()
+            upcoming_meetings = get_upcoming_meetings(meetings, limit=20, sort_order="Earliest deadline")
+            if date_search:
+                filtered_upcoming = []
+                for meeting in upcoming_meetings:
+                    active_deadlines = []
+                    for action in meeting.get("actions", []):
+                        if normalize_status(action) not in {"Pending", "In Progress"}:
+                            continue
+                        deadline = normalize_value(action.get("deadline"), "")
+                        if deadline and deadline != "None":
+                            active_deadlines.append(deadline)
+                    if date_search in active_deadlines:
+                        filtered_upcoming.append(meeting)
+                upcoming_meetings = filtered_upcoming
             if not upcoming_meetings:
-                st.info("No upcoming projects yet.")
+                st.info("No upcoming projects found.")
             else:
                 for meeting in upcoming_meetings:
                     with st.expander(normalize_value(meeting.get("title"), "Untitled")):
