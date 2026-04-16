@@ -76,14 +76,14 @@ def render_action_card(action: dict, editable: bool = False, persist_callback=No
             label_visibility="collapsed",
         )
         deadline_value = normalize_value(action.get("deadline"), "")
-        no_deadline_default = deadline_value in ("", "None")
-        no_deadline = st.checkbox(
-            "No deadline",
-            value=no_deadline_default,
-            key=f"no_deadline_{action['id']}",
+        deadline_mode = st.selectbox(
+            "Deadline mode",
+            ["No deadline", "Set deadline"],
+            index=0 if deadline_value in ("", "None") else 1,
+            key=f"deadline_mode_{action['id']}",
         )
         default_deadline = date.today()
-        if not no_deadline_default:
+        if deadline_value not in ("", "None"):
             try:
                 default_deadline = datetime.strptime(deadline_value, "%Y-%m-%d").date()
             except Exception:
@@ -92,9 +92,9 @@ def render_action_card(action: dict, editable: bool = False, persist_callback=No
             "Deadline",
             value=default_deadline,
             key=f"deadline_{action['id']}",
-            disabled=no_deadline,
+            disabled=deadline_mode == "No deadline",
         )
-        new_deadline = "None" if no_deadline else edited_deadline.isoformat()
+        new_deadline = "None" if deadline_mode == "No deadline" else edited_deadline.isoformat()
         changed = False
         if new_status != current:
             action["status"] = new_status
