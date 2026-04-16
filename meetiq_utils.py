@@ -271,6 +271,87 @@ def fallback_key_decisions(text: str, limit: int = 3) -> list:
     return decisions
 
 
+def fallback_action_items(text: str, limit: int = 5) -> list:
+    actions = []
+    seen = set()
+    for sentence in transcript_sentences(text):
+        lowered = sentence.lower()
+        if "requested support for" in lowered:
+            detail = sentence.split("requested support for", 1)[1].strip(" .")
+            if detail:
+                action_text = f"Provide support for {detail}"
+                if action_text.lower() not in seen:
+                    actions.append(
+                        {
+                            "text": action_text,
+                            "owner": "TalentCorp team",
+                            "company": "TalentCorp",
+                            "deadline": "None",
+                            "priority": "Medium",
+                            "follow_up_required": True,
+                            "follow_up_reason": "Support was explicitly requested during the meeting.",
+                            "suggestion": f"Plan the next steps for {detail}.",
+                            "ner_entities": [],
+                        }
+                    )
+                    seen.add(action_text.lower())
+        if "requested" in lowered and "briefing session" in lowered:
+            action_text = "Prepare and coordinate ambassador programme briefing sessions"
+            if action_text.lower() not in seen:
+                actions.append(
+                    {
+                        "text": action_text,
+                        "owner": "TalentCorp team",
+                        "company": "TalentCorp",
+                        "deadline": "None",
+                        "priority": "Medium",
+                        "follow_up_required": True,
+                        "follow_up_reason": "Briefing support was explicitly requested.",
+                        "suggestion": "Coordinate the briefing scope and schedule with the university.",
+                        "ner_entities": [],
+                    }
+                )
+                seen.add(action_text.lower())
+        if "agreed to continue refining" in lowered:
+            detail = sentence.split("agreed to continue refining", 1)[1].strip(" .")
+            action_text = f"Continue refining {detail}" if detail else "Continue refining the programme framework"
+            if action_text.lower() not in seen:
+                actions.append(
+                    {
+                        "text": action_text,
+                        "owner": "TalentCorp team",
+                        "company": "TalentCorp",
+                        "deadline": "None",
+                        "priority": "Medium",
+                        "follow_up_required": True,
+                        "follow_up_reason": "The meeting ended with agreement to continue refinement.",
+                        "suggestion": "Prepare an updated framework before the next discussion.",
+                        "ner_entities": [],
+                    }
+                )
+                seen.add(action_text.lower())
+        if "requested" in lowered and "onboarding" in lowered:
+            action_text = "Support student account onboarding for the programme"
+            if action_text.lower() not in seen:
+                actions.append(
+                    {
+                        "text": action_text,
+                        "owner": "TalentCorp team",
+                        "company": "TalentCorp",
+                        "deadline": "None",
+                        "priority": "Medium",
+                        "follow_up_required": True,
+                        "follow_up_reason": "Onboarding support was explicitly requested.",
+                        "suggestion": "Define the onboarding process and coordination plan.",
+                        "ner_entities": [],
+                    }
+                )
+                seen.add(action_text.lower())
+        if len(actions) >= limit:
+            break
+    return actions[:limit]
+
+
 def is_objective_only_transcript(text: str) -> bool:
     lowered = (text or "").lower()
     objective_markers = ("purpose of this meeting", "meeting to discuss", "aiming to", "objective", "to align", "to discuss")
