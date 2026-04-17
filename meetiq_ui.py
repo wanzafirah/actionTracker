@@ -51,7 +51,7 @@ def render_action_card(action: dict, editable: bool = False, persist_callback=No
     status = normalize_status(action)
     cfg = STATUS_CFG.get(status, STATUS_CFG["Pending"])
     owner = normalize_value(action.get("owner"), "Not stated")
-    company = normalize_value(action.get("company"), "Internal")
+    department = normalize_value(action.get("department") or action.get("company"), "Not stated")
     suggestion = action.get("suggestion", "")
     st.markdown(
         f"""
@@ -60,7 +60,7 @@ def render_action_card(action: dict, editable: bool = False, persist_callback=No
                 <div class="action-title">{normalize_value(action.get('text'), 'Untitled action')}</div>
                 {pill(status, cfg['color'], cfg['bg'])}
             </div>
-            <div class="action-meta">Assignee: {owner} | Company: {company} | Deadline: {pretty_deadline(normalize_value(action.get('deadline'), 'None'))}</div>
+            <div class="action-meta">Assignee: {owner} | Department: {department} | Deadline: {pretty_deadline(normalize_value(action.get('deadline'), 'None'))}</div>
             <div class="action-subtle">{normalize_value(suggestion, 'No next-step suggestion generated.')}</div>
         </div>
         """,
