@@ -2292,6 +2292,7 @@ if st.session_state.current_page == "Capture":
 # ============================================================
 
 if st.session_state.current_page == "Dashboard":
+    dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
     all_actions = [action for meeting in meetings for action in meeting.get("actions", [])]
     normalized_action_statuses = [normalize_status(action) for action in all_actions]
     total_action_items = len(all_actions)
