@@ -822,9 +822,26 @@ def process_file_submission(user_id: str, uploaded_file: TelegramUpload) -> str:
 
 def should_treat_as_question(text: str) -> bool:
     lowered = text.lower().strip()
+    if not lowered:
+        return False
+
+    if lowered.startswith("/ask"):
+        return True
+
+    if len(lowered) > 260:
+        question_mark_count = lowered.count("?")
+        sentence_count = len(split_sentences(lowered))
+        if question_mark_count <= 1 and sentence_count >= 2:
+            return False
+
     return bool(
-        lowered.startswith("/ask")
-        or "?" in lowered
+        re.match(r"^(what|who|when|where|why|how|which|is|are|do|does|did|can|could|should|would)\b", lowered)
+        or re.match(r"^(please\s+)?(summarize|summarise|recap|summary)\b", lowered)
+        or re.match(r"^(what\s+did\s+we\s+decide|what\s+is\s+the\s+meeting\s+about|what's\s+the\s+recap|whats\s+the\s+recap)\b", lowered)
+        or (
+            lowered.endswith("?")
+            and len(lowered) < 260
+        )
         or any(
             marker in lowered
             for marker in [
@@ -835,7 +852,6 @@ def should_treat_as_question(text: str) -> bool:
                 "action items",
                 "what did we decide",
                 "what is the meeting about",
-                "meeting with",
             ]
         )
     )
