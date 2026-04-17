@@ -1036,21 +1036,34 @@ def _validate_webhook_secret(secret: str | None) -> None:
 
 
 async def _handle_telegram_webhook(request: Request, secret: str | None = None):
-    _validate_webhook_secret(secret)
+    try:
+        _validate_webhook_secret(secret)
 
-    update = await request.json()
-    update_id = update.get("update_id")
-    if update_id is not None:
-        if not _remember_recent_key(_RECENT_UPDATE_IDS, int(update_id)):
-            return JSONResponse({"ok": True, "duplicate": True})
+        try:
+            update = await request.json()
+        except Exception:
+            return JSONResponse({"ok": True, "ignored": True})
 
-    message = update.get("message") or update.get("edited_message")
-    if not message:
+        update_id = update.get("update_id")
+        if update_id is not None:
+            try:
+                update_id = int(update_id)
+            except Exception:
+                update_id = None
+        if update_id is not None:
+            if not _remember_recent_key(_RECENT_UPDATE_IDS, update_id):
+                return JSONResponse({"ok": True, "duplicate": True})
+
+        message = update.get("message") or update.get("edited_message")
+        if not message:
+            return JSONResponse({"ok": True, "ignored": True})
+
+        asyncio.create_task(process_telegram_update(update))
+        return JSONResponse({"ok": True})
+    except HTTPException:
+        raise
+    except Exception:
         return JSONResponse({"ok": True, "ignored": True})
-
-    asyncio.create_task(process_telegram_update(update))
-
-    return JSONResponse({"ok": True})
 
 
 @app.post("/telegram/webhook")
