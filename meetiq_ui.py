@@ -40,7 +40,6 @@ def render_completion_ring(percent: int) -> None:
                     <div class="completion-inner">{safe_percent}%</div>
                 </div>
             </div>
-            <div class="kpi-subtitle">Action completeness</div>
         </div>
         """,
         unsafe_allow_html=True,
