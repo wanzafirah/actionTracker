@@ -1018,6 +1018,42 @@ def find_meeting_by_id(meetings: list, meeting_id: str):
     )
 
 
+def update_meeting_record(meetings: list, meeting_id: str, updates: dict) -> bool:
+    target = find_meeting_by_id(meetings, meeting_id)
+    if not target:
+        return False
+
+    target.update(updates)
+    if "summary" in updates and "recaps" not in updates:
+        target["recaps"] = updates["summary"]
+    if "recaps" in updates and "summary" not in updates:
+        target["summary"] = updates["recaps"]
+    if "department" in updates and "deptName" not in updates:
+        target["deptName"] = updates["department"]
+    if "deptName" in updates and "department" not in updates:
+        target["department"] = updates["deptName"]
+    if "actions" in updates:
+        target["actions"] = updates["actions"]
+    persist_app_data()
+    return True
+
+
+def extract_recap_title(question: str) -> str:
+    text = normalize_value(question, "").strip()
+    if not text:
+        return ""
+    patterns = [
+        r"(?:title|meeting title|recap title)\s*[:\-]\s*(.+)$",
+        r"\"([^\"]+)\"",
+        r"'([^']+)'",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return normalize_value(match.group(1), "")
+    return ""
+
+
 def render_dashboard_chat(meetings: list) -> None:
     current_user_id = get_current_chat_user_id()
     st.text_input(
@@ -2363,6 +2399,8 @@ def init_state():
         st.session_state.current_page = "Dashboard"
     if "tracker_focus" not in st.session_state:
         st.session_state.tracker_focus = "all"
+    if "tracker_editing_meeting_id" not in st.session_state:
+        st.session_state.tracker_editing_meeting_id = ""
 
 
 init_state()
@@ -2962,6 +3000,7 @@ if st.session_state.current_page == "Tracker":
             subtitle = "Pending meetings" if status_text == "Pending" else ("Past deadline meetings" if status_text == "Overdue" else "No pending action items")
             header = f"{record['title']} | {record['meeting_id'] or 'No ID'} | {normalize_value(meeting.get('date'), 'No date')}"
             with st.expander(header):
+                meeting_id_value = normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), "")
                 top_left, top_right = st.columns([1.35, 0.65])
                 with top_left:
                     st.markdown(
@@ -2976,6 +3015,89 @@ if st.session_state.current_page == "Tracker":
                 with top_right:
                     render_kpi_card("Status", status_text, subtitle, status_cfg[status_text])
                     render_kpi_card("Actions", str(len(meeting.get("actions", []))), "Tracked items", "#1e3a5f")
+
+                edit_col, close_col = st.columns([0.18, 0.82])
+                with edit_col:
+                    if st.button("Edit Meeting", key=f"edit_meeting_btn_{meeting_id_value}"):
+                        st.session_state.tracker_editing_meeting_id = meeting_id_value
+                with close_col:
+                    if st.session_state.get("tracker_editing_meeting_id") == meeting_id_value:
+                        st.caption("Editing this meeting record. Save to update the system data.")
+                        if st.button("Close Editor", key=f"close_meeting_editor_{meeting_id_value}"):
+                            st.session_state.tracker_editing_meeting_id = ""
+                            st.rerun()
+
+                if st.session_state.get("tracker_editing_meeting_id") == meeting_id_value:
+                    with st.form(key=f"meeting_edit_form_{meeting_id_value}", clear_on_submit=False):
+                        edit_title = st.text_input("Title", value=normalize_value(meeting.get("title"), ""), key=f"edit_title_{meeting_id_value}")
+                        edit_date = st.text_input("Date", value=normalize_value(meeting.get("date"), today_str()), key=f"edit_date_{meeting_id_value}")
+                        edit_department = st.text_input(
+                            "Group / Department",
+                            value=normalize_value(meeting.get("deptName") or meeting.get("department") or meeting.get("sltdepartment"), ""),
+                            key=f"edit_department_{meeting_id_value}",
+                        )
+                        edit_summary = st.text_area(
+                            "Summary",
+                            value=normalize_value(meeting.get("summary") or meeting.get("recaps"), ""),
+                            height=150,
+                            key=f"edit_summary_{meeting_id_value}",
+                        )
+                        edit_objective = st.text_area(
+                            "Objective",
+                            value=normalize_value(meeting.get("objective"), ""),
+                            height=110,
+                            key=f"edit_objective_{meeting_id_value}",
+                        )
+                        edit_outcome = st.text_area(
+                            "Outcome",
+                            value=normalize_value(meeting.get("outcome"), ""),
+                            height=110,
+                            key=f"edit_outcome_{meeting_id_value}",
+                        )
+                        edit_stakeholders = st.text_area(
+                            "Stakeholders",
+                            value="\n".join(meeting.get("stakeholders", []) or []),
+                            height=110,
+                            placeholder="One stakeholder per line",
+                            key=f"edit_stakeholders_{meeting_id_value}",
+                        )
+                        edit_companies = st.text_area(
+                            "Companies",
+                            value="\n".join(meeting.get("companies", []) or []),
+                            height=110,
+                            placeholder="One company per line",
+                            key=f"edit_companies_{meeting_id_value}",
+                        )
+                        save_edit = st.form_submit_button("Save Changes")
+                        cancel_edit = st.form_submit_button("Cancel")
+
+                    if cancel_edit:
+                        st.session_state.tracker_editing_meeting_id = ""
+                        st.rerun()
+
+                    if save_edit:
+                        meeting_updates = {
+                            "title": edit_title.strip() or normalize_value(meeting.get("title"), "Untitled meeting"),
+                            "date": edit_date.strip() or normalize_value(meeting.get("date"), today_str()),
+                            "meeting date": edit_date.strip() or normalize_value(meeting.get("date"), today_str()),
+                            "deptName": edit_department.strip(),
+                            "department": edit_department.strip(),
+                            "sltdepartment": edit_department.strip(),
+                            "summary": edit_summary.strip(),
+                            "recaps": edit_summary.strip(),
+                            "objective": edit_objective.strip(),
+                            "outcome": edit_outcome.strip(),
+                            "stakeholders": parse_lines(edit_stakeholders),
+                            "companies": parse_lines(edit_companies),
+                            "updated by": "Manual edit",
+                        }
+                        if update_meeting_record(st.session_state.meetings, meeting_id_value, meeting_updates):
+                            persist_app_data()
+                            st.session_state.tracker_editing_meeting_id = ""
+                            st.success("Meeting updated successfully.")
+                            st.rerun()
+                        else:
+                            st.error("Could not find the meeting to update.")
 
                 meta_left, meta_right = st.columns(2)
                 with meta_left:
