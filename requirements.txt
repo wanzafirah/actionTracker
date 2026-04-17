@@ -9,3 +9,5 @@ pypdf
 python-docx
 openai-whisper
 torch
+fastapi
+uvicorn
