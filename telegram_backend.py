@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -27,6 +28,9 @@ from meetiq_utils import (
 
 
 app = FastAPI(title="MeetIQ Telegram Backend", version="1.0.0")
+_RECENT_UPDATE_IDS: set[int] = set()
+_RECENT_MESSAGE_KEYS: set[str] = set()
+_RECENT_CACHE_LIMIT = 500
 
 
 def get_telegram_token() -> str:
@@ -180,6 +184,33 @@ def dedupe_preserve_order(items: list[str]) -> list[str]:
     return cleaned
 
 
+def has_action_signals(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "action item",
+            "action items",
+            "follow up",
+            "follow-up",
+            "next step",
+            "next steps",
+            "needs to",
+            "need to",
+            "should",
+            "must",
+            "please",
+            "to proceed",
+            "deadline",
+            "assign",
+            "assigned",
+            "will start",
+            "will send",
+            "will provide",
+        ]
+    )
+
+
 def split_sentences(text: str) -> list[str]:
     cleaned = re.sub(r"\s+", " ", str(text or "").strip())
     if not cleaned:
@@ -212,11 +243,24 @@ def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
 
 
 def extract_people_from_text(raw_text: str) -> list[str]:
+    intro_patterns = [
+        r"^([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)*(?:\s+and\s+[A-Z][a-z]+)?)\s+had a virtual meeting with\b",
+        r"^([A-Z][a-z]+(?:\s*,\s*[A-Z][a-z]+)*(?:\s+and\s+[A-Z][a-z]+)?)\s+met with\b",
+    ]
     patterns = [
         r"\b(?:given by|by|with|from|presented by|shared by|led by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})",
         r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:explained|presented|shared|mentioned|said|noted)",
     ]
     candidates: list[str] = []
+    for pattern in intro_patterns:
+        match = re.search(pattern, raw_text or "", flags=re.IGNORECASE)
+        if match:
+            people_blob = match.group(1)
+            people_blob = people_blob.replace(" and ", ",")
+            for name in re.split(r"\s*,\s*", people_blob):
+                value = normalize_value(name, "")
+                if value:
+                    candidates.append(value)
     for pattern in patterns:
         for match in re.findall(pattern, raw_text or ""):
             value = normalize_value(match, "")
@@ -496,6 +540,8 @@ Rules:
 - If a department should do the work, put the department in department.
 - If no exact deadline is stated, use "None".
 - If the text contains follow-up work, set follow_up to true.
+- Only list people in stakeholders; do not put organizations or companies in stakeholders.
+- Only list companies or organizations in companies.
 """
     if objective_only:
         system += "\n- The source text may be objective-style meeting notes; infer the recap from the context and do not leave fields blank."
@@ -512,9 +558,14 @@ Rules:
     parsed["outcome"] = normalize_value(parsed.get("outcome"), "") or "Meeting recap captured from the submitted text."
     parsed["key_decisions"] = dedupe_preserve_order(parsed.get("key_decisions", []) or fallback_key_decisions(raw_text))
     parsed["discussion_points"] = dedupe_preserve_order(parsed.get("discussion_points", []) or fallback_discussion_points(raw_text))
-    parsed["action_items"] = parsed.get("action_items", []) or fallback_action_items(raw_text)
+    action_items = parsed.get("action_items", []) or []
+    if not action_items and has_action_signals(raw_text):
+        action_items = fallback_action_items(raw_text)
+    parsed["action_items"] = action_items
     parsed["stakeholders"] = dedupe_preserve_order((parsed.get("stakeholders", []) or []) + extract_people_from_text(raw_text))
     parsed["companies"] = dedupe_preserve_order((parsed.get("companies", []) or []) + extract_organization_candidates(raw_text))
+    parsed["stakeholders"] = [item for item in parsed["stakeholders"] if not any(keyword in item.lower() for keyword in ("sdn bhd", "berhad", "corp", "company", "ministry", "authority", "department", "agency", "university", "college", "group", "team"))]
+    parsed["companies"] = [item for item in parsed["companies"] if item.lower() not in {person.lower() for person in parsed["stakeholders"]}]
     parsed.setdefault("follow_up", bool(parsed.get("action_items")))
     parsed.setdefault("follow_up_reason", "")
     parsed.setdefault("department", "")
@@ -762,6 +813,15 @@ def send_telegram_message(chat_id: int, text: str, reply_to_message_id: int | No
         telegram_api("sendMessage", payload=payload)
 
 
+def _remember_recent_key(store: set, key) -> bool:
+    if key in store:
+        return False
+    store.add(key)
+    if len(store) > _RECENT_CACHE_LIMIT:
+        store.clear()
+    return True
+
+
 def save_meeting_and_history(
     *,
     user_id: str,
@@ -891,20 +951,10 @@ def handle_text_message(user_id: str, text: str) -> str:
     return process_text_submission(user_id, cleaned, source_name="Telegram message")
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"ok": True}
-
-
-@app.post("/telegram/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request):
-    if secret != get_telegram_webhook_secret():
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    update = await request.json()
+async def process_telegram_update(update: dict) -> None:
     message = update.get("message") or update.get("edited_message")
     if not message:
-        return JSONResponse({"ok": True, "ignored": True})
+        return
 
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
@@ -941,6 +991,29 @@ async def telegram_webhook(secret: str, request: Request):
             )
     except Exception as exc:
         send_telegram_message(chat_id, f"Sorry, I could not process that message: {exc}", reply_to_message_id=message_id)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"ok": True}
+
+
+@app.post("/telegram/webhook/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    if secret != get_telegram_webhook_secret():
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    update = await request.json()
+    update_id = update.get("update_id")
+    if update_id is not None:
+        if not _remember_recent_key(_RECENT_UPDATE_IDS, int(update_id)):
+            return JSONResponse({"ok": True, "duplicate": True})
+
+    message = update.get("message") or update.get("edited_message")
+    if not message:
+        return JSONResponse({"ok": True, "ignored": True})
+
+    asyncio.create_task(process_telegram_update(update))
 
     return JSONResponse({"ok": True})
 
