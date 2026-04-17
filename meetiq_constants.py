@@ -69,7 +69,7 @@ DEPARTMENT_SHEET_COLUMNS = ["id", "name", "budget"]
 
 STATUSES = ["Pending", "In Progress", "Done", "Overdue", "Cancelled"]
 MTG_TYPES = ["Virtual", "Physical", "Not Provided"]
-CATEGORIES = ["Event", "External Meeting", "Internal Meeting", "Workshop"]
+CATEGORIES = ["External Meeting", "Internal Meeting", "Workshop"]
 ACTIVITY_CATEGORY_OPTIONS = [
     "Internal Meeting",
     "External Meeting",
