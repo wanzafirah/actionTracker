@@ -163,13 +163,13 @@ def html_lines(items, fallback: str = "None") -> str:
 
 
 def action_belongs_to_talentcorp(action: dict) -> bool:
-    company = normalize_value(action.get("company"), "").strip().lower()
+    department = normalize_value(action.get("department") or action.get("company"), "").strip().lower()
     owner = normalize_value(action.get("owner"), "").strip().lower()
     text = normalize_value(action.get("text"), "").strip().lower()
     allowed = ("", "none", "not stated", "internal", "talentcorp", "talent corp")
-    if company in allowed or "talentcorp" in company or "talent corp" in company:
+    if department in allowed or "talentcorp" in department or "talent corp" in department:
         return True
-    if any(token in company for token in ("external", "partner", "company", "university", "college", "school")):
+    if any(token in department for token in ("external", "partner", "company", "university", "college", "school")):
         return False
     if "talentcorp" in owner or "talent corp" in owner:
         return True
@@ -317,7 +317,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                         {
                             "text": action_text,
                             "owner": "TalentCorp team",
-                            "company": "TalentCorp",
+                            "department": "TalentCorp",
                             "deadline": "None",
                             "priority": "Medium",
                             "follow_up_required": True,
@@ -334,7 +334,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                     {
                         "text": action_text,
                         "owner": "TalentCorp team",
-                        "company": "TalentCorp",
+                        "department": "TalentCorp",
                         "deadline": "None",
                         "priority": "Medium",
                         "follow_up_required": True,
@@ -352,7 +352,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                     {
                         "text": action_text,
                         "owner": "TalentCorp team",
-                        "company": "TalentCorp",
+                        "department": "TalentCorp",
                         "deadline": "None",
                         "priority": "Medium",
                         "follow_up_required": True,
@@ -369,7 +369,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                     {
                         "text": action_text,
                         "owner": "TalentCorp team",
-                        "company": "TalentCorp",
+                        "department": "TalentCorp",
                         "deadline": "None",
                         "priority": "Medium",
                         "follow_up_required": True,
@@ -432,6 +432,7 @@ def build_action_dataframe(meetings: list) -> pd.DataFrame:
                     "meeting_date": meeting["date"],
                     "text": normalize_value(action.get("text"), "Untitled action"),
                     "owner": normalize_value(action.get("owner"), "Not stated"),
+                    "department": normalize_value(action.get("department") or action.get("company"), "Not stated"),
                     "company": normalize_value(action.get("company"), "Internal"),
                     "deadline": normalize_value(action.get("deadline"), "None"),
                     "status": normalize_status(action),
