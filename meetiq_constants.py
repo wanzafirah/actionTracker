@@ -10,6 +10,7 @@ HISTORY_SHEET_NAME = "history"
 
 MEETING_SHEET_COLUMNS = [
     "id",
+    "user_id",
     "title",
     "date",
     "meeting date",
@@ -69,6 +70,10 @@ MEETING_SHEET_COLUMNS = [
 DEPARTMENT_SHEET_COLUMNS = ["id", "name", "budget"]
 HISTORY_SHEET_COLUMNS = [
     "id",
+    "user_id",
+    "thread_key",
+    "thread_date",
+    "thread_title",
     "timestamp",
     "question",
     "answer",
