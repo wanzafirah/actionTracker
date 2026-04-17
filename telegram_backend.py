@@ -715,10 +715,15 @@ def extract_recap_from_answer(answer: str) -> str:
     text = str(answer or "").strip()
     if not text:
         return ""
-    match = re.search(r"Recap:\s*(.*?)(?:\n(?:Objective|Outcome|Stakeholders|Action items|Question):|$)", text, flags=re.IGNORECASE | re.DOTALL)
+    match = re.search(
+        r"(?:Summary|Recap):\s*(.*?)(?:\n(?:Objective|Outcome|Stakeholders|Action items|Question):|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     if match:
         return normalize_value(match.group(1), "").strip()
-    return text.split("\n", 1)[0].strip()
+    first_line = text.split("\n", 1)[0].strip()
+    return re.sub(r"^(?:Summary|Recap):\s*", "", first_line, flags=re.IGNORECASE)
 
 
 def sync_generated_summary_to_meeting(meeting: dict, answer: str) -> None:
