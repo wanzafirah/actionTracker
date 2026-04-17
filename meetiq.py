@@ -2511,7 +2511,7 @@ if st.session_state.current_page == "Capture":
         transcript_mode = st.selectbox(
             "Transcript output",
             ["Translate to English", "Keep spoken language"],
-            help="Use local Whisper translation for mixed-language meetings before summarization.",
+            help="Use translation for mixed-language recordings before summarization.",
         )
         document_files = st.file_uploader(
             "Add supporting files",
