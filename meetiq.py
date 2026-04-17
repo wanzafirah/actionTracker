@@ -1677,9 +1677,9 @@ st.markdown(
     }
     .chat-bubble.user {
         margin-left: auto;
-        background: linear-gradient(135deg, #27425D, #0E1B48);
+        background: linear-gradient(135deg, #C18DB4, #b57aa6);
         color: #ffffff;
-        border-color: rgba(14, 27, 72, 0.22);
+        border-color: rgba(193, 141, 180, 0.28);
         border-bottom-right-radius: 6px;
     }
     .chat-bubble.assistant {
