@@ -1477,14 +1477,17 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         f"Activity metadata:\n{metadata_block or 'None provided'}\n\n"
         f"Meeting content:\n{cleaned_transcript}"
     )
-    raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
     try:
-        result = extract_json(raw)
-    except Exception:
+        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
         try:
-            result = recover_json_with_ollama(raw)
+            result = extract_json(raw)
         except Exception:
-            result = build_safe_pipeline_result(cleaned_transcript, metadata)
+            try:
+                result = recover_json_with_ollama(raw)
+            except Exception:
+                result = build_safe_pipeline_result(cleaned_transcript, metadata)
+    except Exception:
+        result = build_safe_pipeline_result(cleaned_transcript, metadata)
     result = normalize_pipeline_result(result, cleaned_transcript, metadata)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
