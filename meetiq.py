@@ -889,13 +889,15 @@ def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
     )
 
 def render_dashboard_chat(meetings: list) -> None:
-    st.markdown('<div class="chat-thread dashboard-chat-thread">', unsafe_allow_html=True)
-    if st.session_state.chat_history:
-        for message in st.session_state.chat_history[-4:]:
-            render_chat_bubble(message["role"], message["text"])
-    else:
-        render_chat_bubble("assistant", "Ask about meetings, tasks, deadlines, or next steps.")
-    st.markdown("</div>", unsafe_allow_html=True)
+    chat_history_box = st.container(height=420, border=False)
+    with chat_history_box:
+        st.markdown('<div class="chat-thread dashboard-chat-thread">', unsafe_allow_html=True)
+        if st.session_state.chat_history:
+            for message in st.session_state.chat_history:
+                render_chat_bubble(message["role"], message["text"])
+        else:
+            render_chat_bubble("assistant", "Ask about meetings, tasks, deadlines, or next steps.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.form("dashboard_chat_form", clear_on_submit=True):
         question = st.text_input("Ask AI", placeholder="Ask about a meeting or task...", label_visibility="collapsed")
@@ -2322,9 +2324,9 @@ if st.session_state.current_page == "Dashboard":
             with c2:
                 render_kpi_card("Total Action Item", str(total_action_items), "Tracked tasks", "#1e3a5f")
             with c3:
-                render_kpi_card("Pending Action Item", str(pending_action_items), "Open tasks", "#d97706")
+                render_kpi_card("Follow up needed", str(pending_action_items), "Open tasks", "#d97706")
             with c4:
-                render_kpi_card("Completed Action Item", str(completed_action_items), "Done tasks", "#16a34a")
+                render_kpi_card("Completed", str(completed_action_items), "Done tasks", "#16a34a")
             with c5:
                 render_completion_ring(completion_pct)
 
@@ -2489,9 +2491,9 @@ if st.session_state.current_page == "Tracker":
     with c2:
         render_kpi_card("Total Action Item", str(total_tracker_actions), "Tracked tasks", "#1e3a5f")
     with c3:
-        render_kpi_card("Pending Action Item", str(pending_tracker_actions), "Open tasks", "#d97706")
+        render_kpi_card("Follow up needed", str(pending_tracker_actions), "Open tasks", "#d97706")
     with c4:
-        render_kpi_card("Completed Action Item", str(completed_tracker_actions), "Done tasks", "#16a34a")
+        render_kpi_card("Completed", str(completed_tracker_actions), "Done tasks", "#16a34a")
     with c5:
         completion_pct = round((completed_tracker_actions / total_tracker_actions) * 100) if total_tracker_actions else 0
         render_completion_ring(completion_pct)
