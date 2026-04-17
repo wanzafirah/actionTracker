@@ -315,6 +315,58 @@ def extract_meeting_title_from_question(question: str) -> str:
     return ""
 
 
+def is_meeting_lookup_question(question: str) -> bool:
+    lowered = normalize_value(question, "").lower().strip()
+    if not lowered:
+        return False
+    return bool(
+        re.match(r"^(do we have|do we have any|is there|are there|have we|did we have|when is|when was)\b", lowered)
+        or "meeting with" in lowered
+        or "meet with" in lowered
+        or "meeting for" in lowered
+        or "meeting about" in lowered
+    )
+
+
+def build_lookup_response(question: str, meetings: list[dict]) -> tuple[str, dict | None]:
+    tokens = [token for token in re.findall(r"[a-zA-Z0-9&]+", question.lower()) if len(token) >= 3]
+    scored = []
+    for meeting in meetings:
+        score = score_meeting(question, meeting)
+        if score > 0:
+            scored.append((score, meeting))
+
+    matched_meetings = [meeting for _, meeting in sorted(scored, key=lambda item: item[0], reverse=True)]
+    if not matched_meetings:
+        return "No matching meeting found in the saved data.", None
+
+    top = matched_meetings[0]
+    title = normalize_value(top.get("title"), "Untitled meeting")
+    date_text = normalize_value(top.get("date"), "No date")
+    company_text = join_list(top.get("companies", []), "None")
+    stakeholder_text = join_list(top.get("stakeholders", []), "None")
+    action_text = f"{len(top.get('actions', []) or [])} action item(s)"
+    lead = tokens[-1] if tokens else "the requested meeting"
+
+    lines = [
+        f"Yes, I found {len(matched_meetings)} matching meeting(s) for {lead}.",
+        f"Top match: {title} | {date_text}",
+        f"Companies: {company_text}",
+        f"Stakeholders: {stakeholder_text}",
+        f"Action items: {action_text}",
+    ]
+
+    if len(matched_meetings) > 1:
+        lines.append("Other matches:")
+        for meeting in matched_meetings[1:4]:
+            lines.append(
+                f"- {normalize_value(meeting.get('title'), 'Untitled meeting')} | "
+                f"{normalize_value(meeting.get('date'), 'No date')}"
+            )
+
+    return "\n".join(lines), top
+
+
 def extract_people_from_text(raw_text: str) -> list[str]:
     intro_patterns = [
         r"^([A-Z][a-z]+(?:,\s*[A-Z][a-z]+)*(?:\s+and\s+[A-Z][a-z]+)?)\s+had a virtual meeting with\b",
@@ -584,6 +636,7 @@ def build_meeting_record(raw_text: str, recap: dict, user_id: str, source_name: 
 def summarize_meeting_text(raw_text: str, source_name: str = "Telegram message") -> dict:
     prompt_text = compact_transcript_for_prompt(raw_text, max_chars=2400)
     objective_only = is_objective_only_transcript(prompt_text)
+    has_explicit_actions = bool(extract_explicit_action_items_from_text(raw_text)) or has_action_signals(raw_text)
     system = """You are MeetIQ.
 Turn meeting notes, long text, or transcript into a structured meeting recap.
 Return valid JSON only. No markdown, no commentary.
@@ -612,9 +665,12 @@ Rules:
 - Do not invent action items from general discussion.
 - Only list people in stakeholders; do not put organizations or companies in stakeholders.
 - Only list companies or organizations in companies.
+- If the meeting has no clear task or request, return an empty action_items list.
 """
     if objective_only:
         system += "\n- The source text may be objective-style meeting notes; infer the recap from the context and do not leave fields blank."
+    if not has_explicit_actions:
+        system += "\n- This submission may be discussion-heavy; prefer a clean summary and leave action_items empty unless the text clearly lists tasks."
 
     user_msg = f"Source name: {source_name}\nDate: {today_str()}\n\nText:\n{prompt_text}"
     raw = call_ollama(system, user_msg, max_tokens=1200)
@@ -849,6 +905,9 @@ def answer_meeting_question(question: str, meetings: list[dict]) -> tuple[str, d
     action_question = any(keyword in question_lower for keyword in ["action", "task", "deadline", "owner", "pending", "follow up", "follow-up"])
     requested_title = extract_meeting_title_from_question(question) if (recap_question or about_question or action_question) else ""
 
+    if is_meeting_lookup_question(question):
+        return build_lookup_response(question, meetings)
+
     if (recap_question or about_question) and not requested_title:
         return (
             "Please include the meeting title so I can find the saved recap, for example: "
@@ -1040,10 +1099,20 @@ def should_treat_as_question(text: str) -> bool:
 def handle_text_message(user_id: str, text: str) -> str:
     cleaned = text.strip()
     cleaned_lower = cleaned.lower()
-    if cleaned.lower().startswith("/start"):
+    greeting_words = {"hi", "hello", "hey", "start", "help", "/help"}
+
+    if cleaned_lower.startswith("/start") or cleaned_lower in greeting_words:
         return (
-            "Send me a long meeting note, PDF, DOCX, CSV, XLSX, or audio/voice file and I will summarise it.\n"
-            "You can also ask me about past meeting recaps, pending actions, or follow-up items."
+            "How to use MeetIQ Bot:\n"
+            "1. Send a meeting recap, transcript, PDF, DOCX, CSV, XLSX, audio, or voice note.\n"
+            "2. I will generate a short summary and action items and save it to the system.\n"
+            "3. To ask about a saved recap, include the meeting title, for example:\n"
+            "   what is the recap for title: UMT internship coordinators\n"
+            "4. To ask if we have a meeting with a company or organization, just ask naturally:\n"
+            "   do we have meeting with UMP?\n"
+            "5. To ask about action items, you can also use:\n"
+            "   what are the action items for title: UMT internship coordinators\n"
+            "6. Use /end to stop the current session."
         )
 
     if cleaned_lower in {"/end", "/stop", "/cancel", "end", "stop", "cancel", "start"}:
