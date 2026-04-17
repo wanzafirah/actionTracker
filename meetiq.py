@@ -2279,11 +2279,15 @@ st.markdown(
         box-shadow: 0 10px 24px rgba(14, 27, 72, 0.06);
         padding: 1rem 1.05rem;
         min-height: 108px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
     }
     .completion-wrap {
         display: flex;
         justify-content: center;
         padding: 0.2rem 0 0.35rem;
+        flex: 1;
     }
     .completion-ring {
         --size: 88px;
