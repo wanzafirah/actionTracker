@@ -22,6 +22,7 @@ from meetiq_utils import (
     normalize_status,
     normalize_value,
     is_objective_only_transcript,
+    smart_summary_from_transcript,
     today_str,
     uid,
 )
@@ -236,11 +237,7 @@ def normalize_title_key(value: str) -> str:
 
 
 def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
-    sentences = split_sentences(raw_text)
-    if sentences:
-        summary = " ".join(sentences[:3]).strip()
-    else:
-        summary = re.sub(r"\s+", " ", str(raw_text or "").strip())
+    summary = smart_summary_from_transcript(raw_text, limit=3)
     if not summary:
         return "Meeting recap submitted via Telegram."
     if len(summary) > limit:
@@ -1050,7 +1047,7 @@ def process_file_submission(user_id: str, uploaded_file: TelegramUpload) -> str:
     uploaded_file.seek(0)
 
     if lower_name.endswith((".wav", ".mp3", ".m4a", ".ogg", ".webm", ".mp4", ".flac")):
-        raw_text = transcribe_audio_file(uploaded_file)
+        raw_text = transcribe_audio_file(uploaded_file, translate_to_english=True)
     else:
         raw_text = extract_text_from_document(uploaded_file)
 
