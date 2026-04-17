@@ -31,6 +31,7 @@ app = FastAPI(title="MeetIQ Telegram Backend", version="1.0.0")
 _RECENT_UPDATE_IDS: set[int] = set()
 _RECENT_MESSAGE_KEYS: set[str] = set()
 _RECENT_CACHE_LIMIT = 500
+NO_REPLY = "__NO_REPLY__"
 
 
 def get_telegram_token() -> str:
@@ -692,6 +693,24 @@ def format_meeting_answer(meeting: dict, question: str = "") -> str:
     return "\n".join(lines)
 
 
+def format_recap_response(meeting: dict) -> str:
+    summary = normalize_value(meeting.get("summary") or meeting.get("recaps"), "No summary available.")
+    actions = meeting.get("actions", []) or []
+    action_lines = [
+        f"- {normalize_value(action.get('text'))} | owner: {normalize_value(action.get('owner'), 'Not stated')} | "
+        f"department: {normalize_value(action.get('department') or action.get('company'), 'Not stated')} | "
+        f"deadline: {normalize_value(action.get('deadline'), 'None')} | status: {normalize_status(action)}"
+        for action in actions
+    ]
+
+    lines = [f"Summary: {summary}"]
+    if action_lines:
+        lines.extend(["Action items:"] + action_lines)
+    else:
+        lines.append("Action items: None")
+    return "\n".join(lines)
+
+
 def extract_recap_from_answer(answer: str) -> str:
     text = str(answer or "").strip()
     if not text:
@@ -759,7 +778,7 @@ def answer_meeting_question(question: str, meetings: list[dict]) -> tuple[str, d
     if relevant_meetings:
         top_meeting = relevant_meetings[0]
         if recap_question or about_question or action_question:
-            answer = format_meeting_answer(top_meeting, question)
+            answer = format_recap_response(top_meeting)
             sync_generated_summary_to_meeting(top_meeting, answer)
             return answer, top_meeting
 
@@ -834,7 +853,7 @@ def save_meeting_and_history(
     history_thread_date = today_str()
     history_thread_title = normalize_value(meeting_row.get("title"), "Untitled meeting")
     history_thread_key = chat_thread_key(user_id, history_thread_date, history_thread_title, meeting_row.get("id", ""))
-    recap_answer = format_meeting_answer(meeting_row)
+    recap_answer = format_recap_response(meeting_row)
     history_row = build_history_entry(
         user_id=user_id,
         thread_key=history_thread_key,
@@ -862,7 +881,7 @@ def process_text_submission(user_id: str, text: str, source_name: str = "Telegra
         message_text=f"Summarize: {source_name}",
         meeting_record=meeting_record,
     )
-    return format_meeting_answer(meeting_record)
+    return format_recap_response(meeting_record)
 
 
 def process_file_submission(user_id: str, uploaded_file: TelegramUpload) -> str:
@@ -925,8 +944,14 @@ def handle_text_message(user_id: str, text: str) -> str:
             "You can also ask me about past meeting recaps, pending actions, or follow-up items."
         )
 
+    if cleaned.lower() in {"/end", "/stop", "/cancel"}:
+        return NO_REPLY
+
     if cleaned.lower().startswith("/ask"):
         cleaned = cleaned[4:].strip()
+
+    if cleaned.startswith("/"):
+        return "Unknown command. Send a meeting note, file, or ask a recap question."
 
     if should_treat_as_question(cleaned):
         meetings = load_user_meetings(user_id)
@@ -982,7 +1007,8 @@ async def process_telegram_update(update: dict) -> None:
             send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         elif message.get("text"):
             answer = handle_text_message(user_id, message["text"])
-            send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
+            if answer != NO_REPLY:
+                send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         else:
             send_telegram_message(
                 chat_id,
