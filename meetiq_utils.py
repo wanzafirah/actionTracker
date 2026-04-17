@@ -306,81 +306,79 @@ def fallback_key_decisions(text: str, limit: int = 3) -> list:
 def fallback_action_items(text: str, limit: int = 5) -> list:
     actions = []
     seen = set()
+    text_lower = (text or "").lower()
+
+    def add_action(action_text: str, owner: str, department: str, suggestion: str, reason: str):
+        if action_text.lower() in seen or len(actions) >= limit:
+            return
+        actions.append(
+            {
+                "text": action_text,
+                "owner": owner,
+                "department": department,
+                "deadline": "None",
+                "priority": "Medium",
+                "follow_up_required": True,
+                "follow_up_reason": reason,
+                "suggestion": suggestion,
+                "ner_entities": [],
+            }
+        )
+        seen.add(action_text.lower())
+
     for sentence in transcript_sentences(text):
         lowered = sentence.lower()
         if "requested support for" in lowered:
             detail = sentence.split("requested support for", 1)[1].strip(" .")
             if detail:
-                action_text = f"Provide support for {detail}"
-                if action_text.lower() not in seen:
-                    actions.append(
-                        {
-                            "text": action_text,
-                            "owner": "TalentCorp team",
-                            "department": "TalentCorp",
-                            "deadline": "None",
-                            "priority": "Medium",
-                            "follow_up_required": True,
-                            "follow_up_reason": "Support was explicitly requested during the meeting.",
-                            "suggestion": f"Plan the next steps for {detail}.",
-                            "ner_entities": [],
-                        }
-                    )
-                    seen.add(action_text.lower())
-        if "requested" in lowered and "briefing session" in lowered:
-            action_text = "Prepare and coordinate ambassador programme briefing sessions"
-            if action_text.lower() not in seen:
-                actions.append(
-                    {
-                        "text": action_text,
-                        "owner": "TalentCorp team",
-                        "department": "TalentCorp",
-                        "deadline": "None",
-                        "priority": "Medium",
-                        "follow_up_required": True,
-                        "follow_up_reason": "Briefing support was explicitly requested.",
-                        "suggestion": "Coordinate the briefing scope and schedule with the university.",
-                        "ner_entities": [],
-                    }
+                add_action(
+                    f"Follow up on support requested for {detail}",
+                    "TalentCorp team",
+                    "TalentCorp",
+                    f"Clarify the required support and confirm the next steps for {detail}.",
+                    "Support was explicitly requested during the meeting.",
                 )
-                seen.add(action_text.lower())
+        if "requested" in lowered and "briefing session" in lowered:
+            add_action(
+                "Prepare and coordinate briefing sessions",
+                "TalentCorp team",
+                "TalentCorp",
+                "Confirm the briefing scope, timing, and participants before the session.",
+                "Briefing support was explicitly requested.",
+            )
         if "agreed to continue refining" in lowered:
             detail = sentence.split("agreed to continue refining", 1)[1].strip(" .")
-            action_text = f"Continue refining {detail}" if detail else "Continue refining the programme framework"
-            if action_text.lower() not in seen:
-                actions.append(
-                    {
-                        "text": action_text,
-                        "owner": "TalentCorp team",
-                        "department": "TalentCorp",
-                        "deadline": "None",
-                        "priority": "Medium",
-                        "follow_up_required": True,
-                        "follow_up_reason": "The meeting ended with agreement to continue refinement.",
-                        "suggestion": "Prepare an updated framework before the next discussion.",
-                        "ner_entities": [],
-                    }
-                )
-                seen.add(action_text.lower())
+            add_action(
+                f"Continue refining {detail}" if detail else "Continue refining the programme framework",
+                "TalentCorp team",
+                "TalentCorp",
+                "Prepare an updated framework before the next discussion.",
+                "The meeting ended with agreement to continue refinement.",
+            )
         if "requested" in lowered and "onboarding" in lowered:
-            action_text = "Support student account onboarding for the programme"
-            if action_text.lower() not in seen:
-                actions.append(
-                    {
-                        "text": action_text,
-                        "owner": "TalentCorp team",
-                        "department": "TalentCorp",
-                        "deadline": "None",
-                        "priority": "Medium",
-                        "follow_up_required": True,
-                        "follow_up_reason": "Onboarding support was explicitly requested.",
-                        "suggestion": "Define the onboarding process and coordination plan.",
-                        "ner_entities": [],
-                    }
-                )
-                seen.add(action_text.lower())
-        if len(actions) >= limit:
-            break
+            add_action(
+                "Support student account onboarding for the programme",
+                "TalentCorp team",
+                "TalentCorp",
+                "Define the onboarding process and coordination plan.",
+                "Onboarding support was explicitly requested.",
+            )
+    if any(phrase in text_lower for phrase in ("position name", "salary range", "required skills", "number of openings", "upskilling opportunities")):
+        add_action(
+            "Follow up with WD to provide required program details",
+            "TalentCorp team",
+            "TalentCorp",
+            "Request the missing details and confirm the submission timeline with WD.",
+            "The recap explicitly says WD needs to provide program information before the initiative can proceed.",
+        )
+    if "mywira" in text_lower or "program kesinambungan kerjaya veteran" in text_lower:
+        add_action(
+            "Coordinate WD onboarding for the MyWira initiative",
+            "TalentCorp team",
+            "TalentCorp",
+            "Confirm WD participation and align the next steps for the programme.",
+            "The recap says WD is interested in joining the programme and TalentCorp agreed to the collaboration.",
+        )
     return actions[:limit]
 
 
