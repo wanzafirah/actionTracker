@@ -281,6 +281,68 @@ def transcript_sentences(text: str) -> list:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+", text or "") if part.strip()]
 
 
+def smart_summary_sentences(text: str, limit: int = 3) -> list[str]:
+    sentences = transcript_sentences(text)
+    if not sentences:
+        return []
+
+    keywords = (
+        "objective",
+        "purpose",
+        "meeting",
+        "discuss",
+        "review",
+        "align",
+        "decision",
+        "decided",
+        "agreed",
+        "confirmed",
+        "action",
+        "follow up",
+        "follow-up",
+        "deadline",
+        "next step",
+        "next steps",
+        "summary",
+        "outcome",
+        "proposal",
+        "plan",
+        "schedule",
+        "provided",
+        "requested",
+        "will",
+    )
+    scored: list[tuple[int, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        lowered = sentence.lower()
+        score = 0
+        score += sum(1 for keyword in keywords if keyword in lowered)
+        if len(sentence) > 35:
+            score += 1
+        if len(sentence) > 220:
+            score -= 1
+        if index == 0:
+            score += 1
+        if index == len(sentences) - 1:
+            score += 1
+        scored.append((score, index, sentence))
+
+    selected: list[str] = []
+    seen = set()
+    for _, _, sentence in sorted(scored, key=lambda item: (item[0], -item[1]), reverse=True):
+        normalized = re.sub(r"\s+", " ", sentence).strip()
+        key = normalized.lower()
+        if not normalized or key in seen:
+            continue
+        selected.append(normalized)
+        seen.add(key)
+        if len(selected) >= limit:
+            break
+
+    selected.sort(key=lambda item: sentences.index(item) if item in sentences else 0)
+    return selected
+
+
 def fallback_discussion_points(text: str, limit: int = 4) -> list:
     points = []
     for sentence in transcript_sentences(text):
@@ -289,6 +351,8 @@ def fallback_discussion_points(text: str, limit: int = 4) -> list:
             points.append(sentence)
         if len(points) >= limit:
             break
+    if not points:
+        points = smart_summary_sentences(text, limit=limit)
     return points
 
 
@@ -300,7 +364,18 @@ def fallback_key_decisions(text: str, limit: int = 3) -> list:
             decisions.append(sentence)
         if len(decisions) >= limit:
             break
+    if not decisions:
+        sentences = smart_summary_sentences(text, limit=limit)
+        decisions = [sentence for sentence in sentences if any(word in sentence.lower() for word in ("decided", "agreed", "confirmed", "will", "next step", "action"))]
     return decisions
+
+
+def smart_summary_from_transcript(text: str, limit: int = 3) -> str:
+    sentences = smart_summary_sentences(text, limit=limit)
+    if sentences:
+        return " ".join(sentences).strip()
+    compact = re.sub(r"\s+", " ", text or "").strip()
+    return compact[:420].rsplit(" ", 1)[0].rstrip(".,;:") + "..." if len(compact) > 420 else compact
 
 
 def fallback_action_items(text: str, limit: int = 5) -> list:
