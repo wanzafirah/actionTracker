@@ -15,10 +15,12 @@ from meetiq_utils import (
     fallback_action_items,
     fallback_discussion_points,
     fallback_key_decisions,
+    compact_transcript_for_prompt,
     join_list,
     json_dumps_safe,
     normalize_status,
     normalize_value,
+    is_objective_only_transcript,
     today_str,
     uid,
 )
@@ -166,6 +168,103 @@ def parse_lines(text: str) -> list[str]:
     return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
 
+def dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen = set()
+    cleaned = []
+    for item in items or []:
+        value = normalize_value(item, "").strip()
+        key = value.lower()
+        if value and key not in seen:
+            seen.add(key)
+            cleaned.append(value)
+    return cleaned
+
+
+def split_sentences(text: str) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", cleaned)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def fallback_title_from_text(raw_text: str) -> str:
+    first_line = next((line.strip() for line in str(raw_text or "").splitlines() if line.strip()), "")
+    if first_line:
+        if len(first_line) <= 90:
+            return first_line[:90]
+        words = first_line.split()
+        return " ".join(words[:8]).strip() or "Telegram meeting recap"
+    return "Telegram meeting recap"
+
+
+def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
+    sentences = split_sentences(raw_text)
+    if sentences:
+        summary = " ".join(sentences[:3]).strip()
+    else:
+        summary = re.sub(r"\s+", " ", str(raw_text or "").strip())
+    if not summary:
+        return "Meeting recap submitted via Telegram."
+    if len(summary) > limit:
+        return summary[:limit].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
+    return summary
+
+
+def extract_people_from_text(raw_text: str) -> list[str]:
+    patterns = [
+        r"\b(?:given by|by|with|from|presented by|shared by|led by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})",
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\s+(?:explained|presented|shared|mentioned|said|noted)",
+    ]
+    candidates: list[str] = []
+    for pattern in patterns:
+        for match in re.findall(pattern, raw_text or ""):
+            value = normalize_value(match, "")
+            if value:
+                candidates.append(value)
+    return dedupe_preserve_order(candidates)
+
+
+def extract_organization_candidates(raw_text: str) -> list[str]:
+    organization_keywords = (
+        "sdn bhd",
+        "berhad",
+        "corp",
+        "corporation",
+        "company",
+        "ministry",
+        "authority",
+        "department",
+        "agency",
+        "institute",
+        "university",
+        "college",
+        "board",
+        "group",
+        "association",
+        "foundation",
+        "council",
+        "centre",
+        "center",
+        "office",
+        "team",
+    )
+    patterns = [
+        r"\b([A-Z][A-Za-z0-9&'./-]*(?:\s+[A-Z][A-Za-z0-9&'./-]*){0,5}\s+(?:Sdn Bhd|Berhad|Corp|Corporation|Company|Ministry|Authority|Department|Agency|Institute|University|College|Board|Group|Association|Foundation|Council|Centre|Center|Office|Team))\b",
+        r"\b(?:of|with|from|at)\s+([A-Z][A-Za-z0-9&'./-]*(?:\s+[A-Z][A-Za-z0-9&'./-]*){0,5})",
+    ]
+    candidates: list[str] = []
+    lowered = (raw_text or "").lower()
+    for pattern in patterns:
+        for match in re.findall(pattern, raw_text or ""):
+            value = normalize_value(match, "")
+            if not value:
+                continue
+            if any(keyword in value.lower() for keyword in organization_keywords) or value.lower() in lowered:
+                candidates.append(value)
+    return dedupe_preserve_order(candidates)
+
+
 def extract_json_blob(raw: str) -> dict:
     if not raw:
         return {}
@@ -266,14 +365,22 @@ def build_meeting_record(raw_text: str, recap: dict, user_id: str, source_name: 
     meeting_id = uid()
     meeting_title = normalize_value(recap.get("title"), "")
     if meeting_title in ("None", "Untitled meeting"):
-        meeting_title = normalize_value(source_name, "Untitled meeting")
+        meeting_title = fallback_title_from_text(raw_text) if raw_text.strip() else normalize_value(source_name, "Untitled meeting")
 
     summary = normalize_value(recap.get("summary"), "")
+    if summary in ("", "None", "No summary available."):
+        summary = fallback_summary_from_text(raw_text)
     objective = normalize_value(recap.get("objective"), "")
+    if objective in ("", "None", "Not provided"):
+        objective = "Review the meeting discussion and align on the next steps."
     outcome = normalize_value(recap.get("outcome"), "")
-    key_decisions = recap.get("key_decisions", []) or fallback_key_decisions(raw_text)
-    discussion_points = recap.get("discussion_points", []) or fallback_discussion_points(raw_text)
+    if outcome in ("", "None", "Not provided"):
+        outcome = "Meeting recap captured from the submitted text."
+    key_decisions = dedupe_preserve_order(recap.get("key_decisions", []) or fallback_key_decisions(raw_text))
+    discussion_points = dedupe_preserve_order(recap.get("discussion_points", []) or fallback_discussion_points(raw_text))
     action_items = recap.get("action_items", []) or fallback_action_items(raw_text)
+    people_from_text = extract_people_from_text(raw_text)
+    organizations_from_text = extract_organization_candidates(raw_text)
 
     normalized_actions = []
     for index, action in enumerate(action_items):
@@ -313,8 +420,8 @@ def build_meeting_record(raw_text: str, recap: dict, user_id: str, source_name: 
         "followUp": bool(normalized_actions),
         "followup": "Yes" if normalized_actions else "No",
         "followUpReason": normalize_value(recap.get("follow_up_reason"), ""),
-        "stakeholders": recap.get("stakeholders", []) or [],
-        "companies": recap.get("companies", []) or [],
+        "stakeholders": dedupe_preserve_order((recap.get("stakeholders", []) or []) + people_from_text),
+        "companies": dedupe_preserve_order((recap.get("companies", []) or []) + organizations_from_text),
         "keyDecisions": key_decisions,
         "discussionPoints": discussion_points,
         "nlpStats": recap.get("nlpStats", {}) or {},
@@ -358,6 +465,8 @@ def build_meeting_record(raw_text: str, recap: dict, user_id: str, source_name: 
 
 
 def summarize_meeting_text(raw_text: str, source_name: str = "Telegram message") -> dict:
+    prompt_text = compact_transcript_for_prompt(raw_text, max_chars=2400)
+    objective_only = is_objective_only_transcript(prompt_text)
     system = """You are MeetIQ.
 Turn meeting notes, long text, or transcript into a structured meeting recap.
 Return valid JSON only. No markdown, no commentary.
@@ -378,29 +487,36 @@ Required JSON keys:
 - organizationType
 
 Rules:
+- If the text is a meeting recap or minutes, always extract a useful summary even if the text is long.
+- The summary should be 2 to 4 short sentences and capture the main context, decision, and next step.
+- The objective should reflect what the meeting was trying to achieve.
+- The outcome should say what was decided, agreed, or what remains pending.
 - Keep action items concrete and tied to the source text.
 - If someone is assigned the work, put that person's name in owner.
 - If a department should do the work, put the department in department.
 - If no exact deadline is stated, use "None".
 - If the text contains follow-up work, set follow_up to true.
 """
-    user_msg = f"Source name: {source_name}\nDate: {today_str()}\n\nText:\n{raw_text}"
+    if objective_only:
+        system += "\n- The source text may be objective-style meeting notes; infer the recap from the context and do not leave fields blank."
+
+    user_msg = f"Source name: {source_name}\nDate: {today_str()}\n\nText:\n{prompt_text}"
     raw = call_ollama(system, user_msg, max_tokens=1200)
     parsed = extract_json_blob(raw)
     if not parsed:
         parsed = repair_json_with_ollama(raw)
 
-    parsed.setdefault("title", normalize_value(source_name, "Untitled meeting"))
-    parsed.setdefault("summary", normalize_value(raw_text, ""))
-    parsed.setdefault("objective", "")
-    parsed.setdefault("outcome", "")
+    parsed["title"] = normalize_value(parsed.get("title"), "") or fallback_title_from_text(raw_text)
+    parsed["summary"] = normalize_value(parsed.get("summary"), "") or fallback_summary_from_text(raw_text)
+    parsed["objective"] = normalize_value(parsed.get("objective"), "") or "Review the meeting discussion and align on the next steps."
+    parsed["outcome"] = normalize_value(parsed.get("outcome"), "") or "Meeting recap captured from the submitted text."
+    parsed["key_decisions"] = dedupe_preserve_order(parsed.get("key_decisions", []) or fallback_key_decisions(raw_text))
+    parsed["discussion_points"] = dedupe_preserve_order(parsed.get("discussion_points", []) or fallback_discussion_points(raw_text))
+    parsed["action_items"] = parsed.get("action_items", []) or fallback_action_items(raw_text)
+    parsed["stakeholders"] = dedupe_preserve_order((parsed.get("stakeholders", []) or []) + extract_people_from_text(raw_text))
+    parsed["companies"] = dedupe_preserve_order((parsed.get("companies", []) or []) + extract_organization_candidates(raw_text))
     parsed.setdefault("follow_up", bool(parsed.get("action_items")))
     parsed.setdefault("follow_up_reason", "")
-    parsed.setdefault("key_decisions", [])
-    parsed.setdefault("discussion_points", [])
-    parsed.setdefault("action_items", [])
-    parsed.setdefault("stakeholders", [])
-    parsed.setdefault("companies", [])
     parsed.setdefault("department", "")
     parsed.setdefault("organizationType", "Company")
     parsed.setdefault("activityType", "None")
@@ -525,6 +641,34 @@ def format_meeting_answer(meeting: dict, question: str = "") -> str:
     return "\n".join(lines)
 
 
+def extract_recap_from_answer(answer: str) -> str:
+    text = str(answer or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"Recap:\s*(.*?)(?:\n(?:Objective|Outcome|Stakeholders|Action items|Question):|$)", text, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return normalize_value(match.group(1), "").strip()
+    return text.split("\n", 1)[0].strip()
+
+
+def sync_generated_summary_to_meeting(meeting: dict, answer: str) -> None:
+    summary_text = extract_recap_from_answer(answer)
+    if not summary_text:
+        return
+
+    updated = dict(meeting)
+    updated["summary"] = summary_text
+    updated["recaps"] = summary_text
+    updated["objective"] = normalize_value(updated.get("objective"), "") or "Review the meeting discussion and align on the next steps."
+    updated["outcome"] = normalize_value(updated.get("outcome"), "") or "Meeting recap captured from the chatbot response."
+    if not updated.get("user_id"):
+        updated["user_id"] = normalize_chat_user_id(meeting.get("user_id", ""))
+    try:
+        supabase_upsert(MEETINGS_SHEET_NAME, [updated])
+    except Exception:
+        pass
+
+
 def answer_meeting_question(question: str, meetings: list[dict]) -> tuple[str, dict | None]:
     last_meeting_id = ""
     history = load_user_history(meetings[0].get("user_id", "") if meetings else "")
@@ -564,7 +708,9 @@ def answer_meeting_question(question: str, meetings: list[dict]) -> tuple[str, d
     if relevant_meetings:
         top_meeting = relevant_meetings[0]
         if recap_question or about_question or action_question:
-            return format_meeting_answer(top_meeting, question), top_meeting
+            answer = format_meeting_answer(top_meeting, question)
+            sync_generated_summary_to_meeting(top_meeting, answer)
+            return answer, top_meeting
 
     meeting_blocks = []
     for meeting in relevant_meetings[:5]:
@@ -579,7 +725,10 @@ Be concise, practical, and business-friendly.
 """
     user_msg = f"Meeting data:\n{ctx}\n\nQuestion: {question}"
     answer = call_ollama(system, user_msg, max_tokens=300)
-    return answer.strip() or "No answer generated.", (relevant_meetings[0] if relevant_meetings else None)
+    answer_text = answer.strip() or "No answer generated."
+    if relevant_meetings:
+        sync_generated_summary_to_meeting(relevant_meetings[0], answer_text)
+    return answer_text, (relevant_meetings[0] if relevant_meetings else None)
 
 
 def split_telegram_message(text: str, limit: int = 3500) -> list[str]:
