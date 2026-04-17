@@ -231,6 +231,10 @@ def fallback_title_from_text(raw_text: str) -> str:
     return "Telegram meeting recap"
 
 
+def normalize_title_key(value: str) -> str:
+    return re.sub(r"\s+", " ", normalize_value(value, "").strip().lower())
+
+
 def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
     sentences = split_sentences(raw_text)
     if sentences:
@@ -287,6 +291,28 @@ def extract_explicit_action_items_from_text(raw_text: str) -> list[dict]:
             break
 
     return collected
+
+
+def extract_meeting_title_from_question(question: str) -> str:
+    text = normalize_value(question, "").strip()
+    if not text:
+        return ""
+
+    patterns = [
+        r"(?:title|meeting title|recap title)\s*[:\-]\s*(.+)$",
+        r"(?:for|about|regarding|on)\s+(.+?)(?:\?|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            candidate = normalize_value(match.group(1), "")
+            candidate = re.sub(r"\b(recaps?|summary|action items?)\b.*$", "", candidate, flags=re.IGNORECASE).strip()
+            return candidate
+
+    quoted = re.search(r"\"([^\"]+)\"|'([^']+)'", text)
+    if quoted:
+        return normalize_value(quoted.group(1) or quoted.group(2), "")
+    return ""
 
 
 def extract_people_from_text(raw_text: str) -> list[str]:
@@ -821,6 +847,24 @@ def answer_meeting_question(question: str, meetings: list[dict]) -> tuple[str, d
         for phrase in ["about", "summary", "recap", "objective", "topic", "agenda", "discuss"]
     )
     action_question = any(keyword in question_lower for keyword in ["action", "task", "deadline", "owner", "pending", "follow up", "follow-up"])
+    requested_title = extract_meeting_title_from_question(question) if (recap_question or about_question or action_question) else ""
+
+    if (recap_question or about_question) and not requested_title:
+        return (
+            "Please include the meeting title so I can find the saved recap, for example: "
+            "`what is the recap for title: UMT internship coordinators`",
+            None,
+        )
+
+    if requested_title:
+        title_key = normalize_title_key(requested_title)
+        titled_meetings = [
+            meeting
+            for meeting in relevant_meetings
+            if title_key and title_key in normalize_title_key(meeting.get("title"))
+        ]
+        if titled_meetings:
+            relevant_meetings = titled_meetings
 
     if relevant_meetings:
         top_meeting = relevant_meetings[0]
