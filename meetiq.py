@@ -6,7 +6,6 @@ import ast
 from datetime import date, datetime
 
 import pandas as pd
-import plotly.express as px
 import requests
 import streamlit as st
 
@@ -37,7 +36,6 @@ from meetiq_services import call_ollama, extract_text_from_document, transcribe_
 from meetiq_ui import render_action_card, render_chat_bubble, render_completion_ring, render_kpi_card, render_summary_panel
 from meetiq_utils import (
     action_belongs_to_talentcorp,
-    add_month_columns,
     append_document_to_transcript,
     build_action_dataframe,
     build_calendar_html,
@@ -65,9 +63,6 @@ from meetiq_utils import (
     parse_yes_no,
     pretty_deadline,
     render_entity_list,
-    render_plotly_chart,
-    rm,
-    style_plotly,
     today_str,
     uid,
     yes_no_text,
@@ -143,7 +138,7 @@ def sync_page_from_query():
     except Exception:
         return
 
-    if page_value in {"Dashboard", "Productivity", "Capture", "Tracker", "Finance"}:
+    if page_value in {"Dashboard", "Capture", "Tracker"}:
         st.session_state.current_page = page_value
     if focus_value in {"all", "open", "done"}:
         st.session_state.tracker_focus = focus_value
@@ -694,7 +689,17 @@ def build_email_preview_meeting(result: dict, pending: dict) -> dict:
 
 def build_meeting_record(result: dict, pending: dict) -> dict:
     meeting_id = uid()
-    department = find_department_by_name(pending["dept"])
+    selected_departments = pending.get("dept", [])
+    if isinstance(selected_departments, str):
+        selected_departments = [selected_departments] if selected_departments else []
+    selected_department_records = [
+        department
+        for department_name in selected_departments
+        if (department := find_department_by_name(department_name))
+    ]
+    department_names = [department["name"] for department in selected_department_records]
+    department_ids = [department["id"] for department in selected_department_records]
+    department_text = ", ".join(department_names)
     preview_actions = pending.get("preview_actions", [])
     return {
         "id": meeting_id,
@@ -717,11 +722,11 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
         "discussionPoints": result.get("discussion_points", []),
         "nlpStats": result.get("nlp_pipeline", {}),
         "transcript": pending["transcript"],
-        "deptId": department["id"] if department else "",
-        "deptName": department["name"] if department else "",
-        "department": department["name"] if department else "",
-        "actualCost": pending["actual_cost"],
-        "budgetUsed": pending["actual_cost"],
+        "deptId": " | ".join(department_ids),
+        "deptName": department_text,
+        "department": department_text,
+        "actualCost": 0,
+        "budgetUsed": 0,
         "estimatedCost": result.get("estimated_budget", 0),
         "budgetNotes": result.get("budget_notes", ""),
         "activityCategory": pending.get("activity_category", ""),
@@ -740,7 +745,7 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
         "representativePosition": pending.get("representative_position", ""),
         "representativeName": pending.get("representative_name", ""),
         "representativeDepartment": pending.get("representative_department", ""),
-        "sltdepartment": pending.get("slt_department", ""),
+        "sltdepartment": pending.get("slt_department", department_text),
         "sltposition": pending.get("slt_position", ""),
         "sltreps": pending.get("slt_reps", ""),
         "stfemail": pending.get("stf_email", ""),
@@ -1937,6 +1942,8 @@ def init_state():
         st.session_state.capture_activity_id = ""
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Dashboard"
+    elif st.session_state.current_page not in {"Dashboard", "Capture", "Tracker"}:
+        st.session_state.current_page = "Dashboard"
     if "tracker_focus" not in st.session_state:
         st.session_state.tracker_focus = "all"
 
@@ -1980,14 +1987,6 @@ with st.sidebar:
         on_click=set_current_page,
         args=("Tracker",),
     )
-    st.button(
-        "Finance",
-        key="nav_finance",
-        use_container_width=True,
-        type="primary" if st.session_state.current_page == "Finance" else "secondary",
-        on_click=set_current_page,
-        args=("Finance",),
-    )
 
 
 # ============================================================
@@ -2001,7 +2000,7 @@ if st.session_state.current_page == "Capture":
     activity_box = st.container(border=True)
     with activity_box:
         act_left, act_right = st.columns(2)
-        dept_names = get_department_options()
+        dept_names = [department["name"] for department in st.session_state.departments]
         with act_left:
             activity_category = st.selectbox("Category", CATEGORIES, key="capture_activity_category")
             activity_id = st.text_input("Activity ID", key="capture_activity_id", placeholder="Generate or enter activity ID")
@@ -2011,8 +2010,7 @@ if st.session_state.current_page == "Capture":
             activity_type = st.selectbox("Activity Type", ACTIVITY_TYPE_OPTIONS, key="capture_activity_type")
         with act_right:
             meeting_date = st.date_input("Meeting Date", value=date.today(), key="capture_meeting_date")
-            actual_cost = st.number_input("Actual Cost (RM)", min_value=0.0, step=50.0)
-            dept_choice = st.selectbox("Department", dept_names)
+            dept_choice = st.multiselect("Department", dept_names, key="capture_department_choices")
 
     role = ""
     main_activity = ""
@@ -2150,7 +2148,7 @@ if st.session_state.current_page == "Capture":
                 "Organization Type": organization_type,
                 "Date From": date_from.isoformat(),
                 "Date To": date_to.isoformat(),
-                "Department": "" if dept_choice == dept_names[0] else dept_choice,
+                "Department": ", ".join(dept_choice),
                 "Representative Position": representative_position,
                 "Representative Name": representative_name,
                 "Representative Department": representative_department,
@@ -2168,8 +2166,7 @@ if st.session_state.current_page == "Capture":
                 "transcript": transcript,
                 "mtype": activity_type,
                 "category": activity_category,
-                "dept": dept_choice if dept_choice != dept_names[0] else "",
-                "actual_cost": actual_cost,
+                "dept": dept_choice,
                 "meeting_date": meeting_date.isoformat(),
                 "activity_category": activity_category,
                 "activity_id": resolved_activity_id,
@@ -2190,7 +2187,7 @@ if st.session_state.current_page == "Capture":
                 "invitation_from": invitation_from,
                 "location_meeting": location_meeting,
                 "other_reps": other_reps,
-                "slt_department": representative_department or ("" if dept_choice == dept_names[0] else dept_choice),
+                "slt_department": representative_department or ", ".join(dept_choice),
                 "slt_position": representative_position,
                 "slt_reps": representative_name,
                 "stf_email": stfemail,
@@ -2222,22 +2219,15 @@ if st.session_state.current_page == "Capture":
 
         insight_col, entity_col = st.columns([1.2, 0.8])
         with insight_col:
-            st.markdown("### Decisions & Discussion")
-            decisions_text = st.text_area(
-                "Key Decisions",
-                value="\n".join(normalize_value(item, "") for item in result.get("key_decisions", [])),
-                key="preview_key_decisions",
-                height=120,
-                placeholder="Add one decision per line",
-            )
+            st.markdown("### Discussion")
             discussions_text = st.text_area(
                 "Discussion Points",
                 value="\n".join(normalize_value(item, "") for item in result.get("discussion_points", [])),
                 key="preview_discussion_points",
-                height=180,
+                height=220,
                 placeholder="Add one discussion point per line",
             )
-            result["key_decisions"] = parse_preview_list(decisions_text)
+            result["key_decisions"] = []
             result["discussion_points"] = parse_preview_list(discussions_text)
 
         with entity_col:
@@ -2302,37 +2292,28 @@ if st.session_state.current_page == "Capture":
 # ============================================================
 
 if st.session_state.current_page == "Dashboard":
-    dashboard_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True) if not meeting_df.empty else [date.today().year]
-
-    def meeting_dashboard_status(meeting: dict) -> str:
-        actions = meeting.get("actions", [])
-        if not actions:
-            return "Completed"
-        statuses = [normalize_status(action) for action in actions]
-        if "Overdue" in statuses:
-            return "Overdue"
-        if any(status in {"Pending", "In Progress"} for status in statuses):
-            return "Pending"
-        return "Completed"
-
-    dashboard_meeting_records = [{"meeting": meeting, "status": meeting_dashboard_status(meeting)} for meeting in meetings]
-    done_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Completed")
-    pending_count = sum(1 for record in dashboard_meeting_records if record["status"] == "Pending")
-    completion_pct = round((done_count / len(dashboard_meeting_records)) * 100) if dashboard_meeting_records else 0
+    all_actions = [action for meeting in meetings for action in meeting.get("actions", [])]
+    normalized_action_statuses = [normalize_status(action) for action in all_actions]
+    total_action_items = len(all_actions)
+    pending_action_items = sum(1 for status in normalized_action_statuses if status in {"Pending", "In Progress", "Overdue"})
+    completed_action_items = sum(1 for status in normalized_action_statuses if status == "Done")
+    completion_pct = round((completed_action_items / total_action_items) * 100) if total_action_items else 0
 
     dashboard_left, dashboard_right = st.columns([1.35, 0.85])
     with dashboard_left:
         overview_card = st.container(border=True)
         with overview_card:
-            st.markdown("### Today’s Brief")
-            c1, c2, c3, c4 = st.columns(4)
+            st.markdown("### Today's Brief")
+            c1, c2, c3, c4, c5 = st.columns(5)
             with c1:
-                render_kpi_card("Meetings", str(len(meetings)), "Stored records", "#0f766e")
+                render_kpi_card("Total Meeting", str(len(meetings)), "Stored records", "#0f766e")
             with c2:
-                render_kpi_card("Pending", str(pending_count), "Pending meetings", "#d97706")
+                render_kpi_card("Total Action Item", str(total_action_items), "Tracked tasks", "#1e3a5f")
             with c3:
-                render_kpi_card("Done", str(done_count), "Closed or no-action meetings", "#16a34a")
+                render_kpi_card("Pending Action Item", str(pending_action_items), "Open tasks", "#d97706")
             with c4:
+                render_kpi_card("Completed Action Item", str(completed_action_items), "Done tasks", "#16a34a")
+            with c5:
                 render_completion_ring(completion_pct)
 
         upcoming_card = st.container(border=True)
@@ -2483,19 +2464,22 @@ if st.session_state.current_page == "Tracker":
             }
         )
 
-    c1, c2, c3, c4 = st.columns(4)
+    tracker_actions = [action for meeting in meetings for action in meeting.get("actions", [])]
+    tracker_statuses = [normalize_status(action) for action in tracker_actions]
+    total_tracker_actions = len(tracker_actions)
+    pending_tracker_actions = sum(1 for status in tracker_statuses if status in {"Pending", "In Progress", "Overdue"})
+    completed_tracker_actions = sum(1 for status in tracker_statuses if status == "Done")
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        render_kpi_card("Saved Meetings", str(len(meeting_records)), "Stored records", "#0f766e")
+        render_kpi_card("Total Meeting", str(len(meeting_records)), "Stored records", "#0f766e")
     with c2:
-        render_kpi_card("Pending", str(sum(1 for record in meeting_records if record["status"] == "Pending")), "Pending meetings", "#d97706")
+        render_kpi_card("Total Action Item", str(total_tracker_actions), "Tracked tasks", "#1e3a5f")
     with c3:
-        render_kpi_card("Completed", str(sum(1 for record in meeting_records if record["status"] == "Completed")), "Closed or no-action meetings", "#16a34a")
+        render_kpi_card("Pending Action Item", str(pending_tracker_actions), "Open tasks", "#d97706")
     with c4:
-        completion_pct = round(
-            (
-                sum(1 for record in meeting_records if record["status"] == "Completed") / len(meeting_records)
-            ) * 100
-        ) if meeting_records else 0
+        render_kpi_card("Completed Action Item", str(completed_tracker_actions), "Done tasks", "#16a34a")
+    with c5:
+        completion_pct = round((completed_tracker_actions / total_tracker_actions) * 100) if total_tracker_actions else 0
         render_completion_ring(completion_pct)
 
     filt_left, filt_right = st.columns([1.4, 1])
@@ -2580,11 +2564,6 @@ if st.session_state.current_page == "Tracker":
                         unsafe_allow_html=True,
                     )
 
-                if meeting.get("keyDecisions"):
-                    st.markdown("**Key Decisions**")
-                    for decision in meeting["keyDecisions"]:
-                        st.write(normalize_value(decision))
-
                 if meeting.get("discussionPoints"):
                     st.markdown("**Discussion Points**")
                     for point in meeting["discussionPoints"]:
@@ -2596,89 +2575,3 @@ if st.session_state.current_page == "Tracker":
                         render_action_card(action, editable=True, persist_callback=persist_app_data)
                 else:
                     st.success("No action item. This meeting is considered completed.")
-
-
-# ============================================================
-# Section 10. Finance Tab
-# ============================================================
-
-if st.session_state.current_page == "Finance":
-    st.subheader("Finance Tracker")
-
-    total_spend = float(meeting_df["cost"].sum()) if not meeting_df.empty else 0
-    total_est = float(sum(meeting.get("estimatedCost", 0) for meeting in meetings))
-    over_budget = sum(1 for meeting in meetings if meeting.get("actualCost", 0) > meeting.get("estimatedCost", 0) > 0)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        render_kpi_card("Total Spend", rm(total_spend), "Recorded across meetings", "#0f766e")
-    with c2:
-        render_kpi_card("Estimated Budget", rm(total_est), "AI extracted estimate", "#2563eb")
-    with c3:
-        render_kpi_card("Over Budget", str(over_budget), "Meetings above estimate", "#dc2626")
-
-    if not meeting_df.empty:
-        finance_years = sorted(meeting_df["year"].dropna().unique().tolist(), reverse=True)
-        finance_year = st.selectbox("Finance Year", finance_years, key="finance_year_filter")
-        finance_df = add_month_columns(meeting_df[meeting_df["year"] == finance_year].copy(), "date")
-        finance_left, finance_right = st.columns(2)
-        with finance_left:
-            monthly = (
-                finance_df.groupby(["month_num", "month_label"], as_index=False)["cost"]
-                .sum()
-                .sort_values("month_num")
-            )
-            fig_monthly = px.line(
-                monthly,
-                x="month_label",
-                y="cost",
-                title=f"Monthly Spend Trend ({finance_year})",
-                markers=True,
-                line_shape="linear",
-                color_discrete_sequence=["#0f766e"],
-            )
-            style_plotly(fig_monthly)
-            st.plotly_chart(fig_monthly, use_container_width=True)
-        with finance_right:
-            dept_rollup = (
-                finance_df.groupby(["month_num", "month_label", "department"], as_index=False)["cost"]
-                .sum()
-                .sort_values("month_num")
-            )
-            fig_dept = px.line(
-                dept_rollup,
-                x="month_label",
-                y="cost",
-                title=f"Monthly Spend by Department ({finance_year})",
-                color="department",
-                markers=True,
-                color_discrete_sequence=["#1e3a5f", "#0f766e", "#2563eb", "#d97706", "#7c3aed"],
-            )
-            style_plotly(fig_dept)
-            st.plotly_chart(fig_dept, use_container_width=True)
-
-    st.markdown("### Department Budgets")
-    with st.form("add_dept"):
-        dept_name = st.text_input("Department Name")
-        dept_budget = st.number_input("Annual Budget (RM)", min_value=0.0, step=1000.0)
-        submitted = st.form_submit_button("Add Department")
-        if submitted and dept_name:
-            st.session_state.departments.append({"id": uid(), "name": dept_name, "budget": dept_budget})
-            persist_app_data()
-            st.rerun()
-
-    for dept in st.session_state.departments:
-        dept_meetings = [meeting for meeting in meetings if meeting.get("deptId") == dept["id"]]
-        spend = sum(meeting.get("actualCost", 0) for meeting in dept_meetings)
-        budget = dept.get("budget", 0)
-        pct = min((spend / budget) * 100 if budget else 0, 100)
-        st.markdown(
-            f"""
-            <div class="info-card">
-                <div class="mini-title">{dept['name']}</div>
-                <div class="mini-copy">{rm(spend)} used of {rm(budget)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.progress(pct / 100 if budget else 0)
