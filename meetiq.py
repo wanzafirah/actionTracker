@@ -1972,20 +1972,20 @@ with st.sidebar:
         args=("Dashboard",),
     )
     st.button(
-        "Capture",
-        key="nav_capture",
-        use_container_width=True,
-        type="primary" if st.session_state.current_page == "Capture" else "secondary",
-        on_click=set_current_page,
-        args=("Capture",),
-    )
-    st.button(
         "Tracker",
         key="nav_tracker",
         use_container_width=True,
         type="primary" if st.session_state.current_page == "Tracker" else "secondary",
         on_click=set_current_page,
         args=("Tracker",),
+    )
+    st.button(
+        "Capture",
+        key="nav_capture",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "Capture" else "secondary",
+        on_click=set_current_page,
+        args=("Capture",),
     )
 
 
@@ -2011,6 +2011,7 @@ if st.session_state.current_page == "Capture":
         with act_right:
             meeting_date = st.date_input("Meeting Date", value=date.today(), key="capture_meeting_date")
             dept_choice = st.multiselect("Department", dept_names, key="capture_department_choices")
+            report_by = st.text_input("Report By", key="capture_updated_by", placeholder="Enter reporter name")
 
     role = ""
     main_activity = ""
@@ -2028,7 +2029,7 @@ if st.session_state.current_page == "Capture":
     representative_department = ""
     stfemail = ""
     supemail = ""
-    updated_by = ""
+    updated_by = report_by
 
     transcript_box = st.container(border=True)
     with transcript_box:
@@ -2305,9 +2306,19 @@ if st.session_state.current_page == "Dashboard":
         overview_card = st.container(border=True)
         with overview_card:
             st.markdown("### Today's Brief")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                render_kpi_card("Total Meeting", str(len(meetings)), "Stored records", "#0f766e")
+            st.markdown(
+                f"""
+                <div class="kpi-card" style="display:flex;align-items:center;justify-content:space-between;min-height:108px;margin-bottom:1rem;padding:1.15rem 1.4rem;">
+                    <div>
+                        <div class="kpi-label">Total Meeting</div>
+                        <div class="kpi-subtitle">Stored records</div>
+                    </div>
+                    <div class="kpi-value" style="color:#0f766e">{len(meetings)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            c2, c3, c4, c5 = st.columns(4)
             with c2:
                 render_kpi_card("Total Action Item", str(total_action_items), "Tracked tasks", "#1e3a5f")
             with c3:
@@ -2344,11 +2355,13 @@ if st.session_state.current_page == "Dashboard":
             else:
                 for meeting in upcoming_meetings:
                     with st.expander(normalize_value(meeting.get("title"), "Untitled")):
+                        report_by_value = normalize_value(meeting.get("updatedBy") or meeting.get("updated by"), "Not stated")
                         st.markdown(
                             f"""
                             <div class="upcoming-item">
                                 <div class="upcoming-top">
                                     <div>
+                                        <div class="mini-copy"><strong>Report by:</strong> {report_by_value}</div>
                                         <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
                                     </div>
                                     <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
