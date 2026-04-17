@@ -1182,6 +1182,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
 
 def chat_with_meetings(question: str, meetings: list) -> str:
     question_lower = question.lower().strip()
+    last_meeting_id = st.session_state.get("chat_context_meeting_id", "")
     question_tokens = {
         token
         for token in re.findall(r"[a-zA-Z0-9&]+", question_lower)
@@ -1232,6 +1233,17 @@ def chat_with_meetings(question: str, meetings: list) -> str:
             scored_meetings.append((score, meeting))
 
     relevant_meetings = [meeting for _, meeting in sorted(scored_meetings, key=lambda item: item[0], reverse=True)]
+    if not relevant_meetings and last_meeting_id:
+        context_meeting = next(
+            (
+                meeting
+                for meeting in meetings
+                if normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), "") == last_meeting_id
+            ),
+            None,
+        )
+        if context_meeting:
+            relevant_meetings = [context_meeting]
     if not relevant_meetings:
         relevant_meetings = meetings[:5]
 
@@ -1255,6 +1267,10 @@ def chat_with_meetings(question: str, meetings: list) -> str:
 
     if action_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
+        st.session_state.chat_context_meeting_id = normalize_value(
+            top_meeting.get("meetingID") or top_meeting.get("activityId") or top_meeting.get("id"),
+            "",
+        )
         top_title = normalize_value(top_meeting.get("title"), "this meeting")
         active_actions = top_meeting.get("actions", [])
         if active_actions:
@@ -1271,6 +1287,10 @@ def chat_with_meetings(question: str, meetings: list) -> str:
 
     if about_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
+        st.session_state.chat_context_meeting_id = normalize_value(
+            top_meeting.get("meetingID") or top_meeting.get("activityId") or top_meeting.get("id"),
+            "",
+        )
         top_title = normalize_value(top_meeting.get("title"), "this meeting")
         summary = normalize_value(top_meeting.get("summary"), "")
         objective = normalize_value(top_meeting.get("objective"), "")
@@ -1701,9 +1721,23 @@ st.markdown(
     .streamlit-expanderContent p, .streamlit-expanderContent div, .streamlit-expanderContent label, .streamlit-expanderContent span {
         color: var(--text) !important;
     }
+    [data-testid="stExpander"] {
+        border: none !important;
+        background: transparent !important;
+    }
     [data-testid="stExpander"] summary, [data-testid="stExpander"] summary p, [data-testid="stExpander"] summary span, [data-testid="stExpander"] summary div {
         color: var(--text) !important;
         opacity: 1 !important;
+    }
+    [data-testid="stExpander"] summary {
+        background: #ffffff !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 16px !important;
+        padding: 0.7rem 0.9rem !important;
+        box-shadow: 0 10px 24px rgba(14, 27, 72, 0.06) !important;
+    }
+    [data-testid="stExpander"] summary:hover {
+        background: #f8f6fb !important;
     }
     .date-group {
         margin: 1rem 0 0.75rem;
