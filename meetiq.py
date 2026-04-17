@@ -65,6 +65,7 @@ from meetiq_utils import (
     parse_yes_no,
     pretty_deadline,
     render_entity_list,
+    smart_summary_from_transcript,
     today_str,
     uid,
     yes_no_text,
@@ -1266,8 +1267,7 @@ def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) ->
     meeting_type = normalize_value(metadata.get("Activity Type"), "") or "Not Provided"
     category = normalize_value(metadata.get("Category"), "") or "Not Provided"
     objective = discussion_points[0] if discussion_points else "Objective not clearly extracted."
-    summary_sentences = transcript_sentences(transcript)[:3]
-    summary = " ".join(summary_sentences).strip() or "Summary could not be generated from the transcript."
+    summary = smart_summary_from_transcript(transcript, limit=3) or "Summary could not be generated from the transcript."
     return {
         "title": title,
         "meeting_type": meeting_type,
