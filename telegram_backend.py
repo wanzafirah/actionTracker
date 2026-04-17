@@ -1029,10 +1029,14 @@ def health() -> dict:
     return {"ok": True}
 
 
-@app.post("/telegram/webhook/{secret}")
-async def telegram_webhook(secret: str, request: Request):
-    if secret != get_telegram_webhook_secret():
+def _validate_webhook_secret(secret: str | None) -> None:
+    expected = get_telegram_webhook_secret()
+    if expected and secret and secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
+
+
+async def _handle_telegram_webhook(request: Request, secret: str | None = None):
+    _validate_webhook_secret(secret)
 
     update = await request.json()
     update_id = update.get("update_id")
@@ -1049,6 +1053,26 @@ async def telegram_webhook(secret: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/telegram/webhook")
+async def telegram_webhook_plain(request: Request):
+    return await _handle_telegram_webhook(request, None)
+
+
+@app.post("/telegram/webhook/")
+async def telegram_webhook_plain_slash(request: Request):
+    return await _handle_telegram_webhook(request, None)
+
+
+@app.post("/telegram/webhook/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    return await _handle_telegram_webhook(request, secret)
+
+
+@app.post("/telegram/webhook/{secret}/")
+async def telegram_webhook_slash(secret: str, request: Request):
+    return await _handle_telegram_webhook(request, secret)
+
+
 def set_telegram_webhook(base_url: str | None = None) -> dict:
     token = get_telegram_token()
     secret = get_telegram_webhook_secret()
@@ -1060,7 +1084,8 @@ def set_telegram_webhook(base_url: str | None = None) -> dict:
         raise RuntimeError("Provide TELEGRAM_WEBHOOK_URL or pass base_url.")
 
     webhook_url = f"{target}/telegram/webhook/{secret}"
-    return telegram_api("setWebhook", {"url": webhook_url})
+    payload = {"url": webhook_url}
+    return telegram_api("setWebhook", payload)
 
 
 if __name__ == "__main__":
