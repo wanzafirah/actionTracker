@@ -239,6 +239,10 @@ def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFr
             history.append(
                 {
                     "id": first_nonempty(row, "id", fallback=""),
+                    "user_id": first_nonempty(row, "user_id", fallback=""),
+                    "thread_key": first_nonempty(row, "thread_key", fallback=""),
+                    "thread_date": first_nonempty(row, "thread_date", fallback=""),
+                    "thread_title": first_nonempty(row, "thread_title", fallback=""),
                     "timestamp": first_nonempty(row, "timestamp", fallback=""),
                     "question": first_nonempty(row, "question", fallback=""),
                     "answer": first_nonempty(row, "answer", fallback=""),
@@ -335,6 +339,10 @@ def build_history_rows(history: list) -> list:
     return [
         {
             "id": entry.get("id", ""),
+            "user_id": entry.get("user_id", ""),
+            "thread_key": entry.get("thread_key", ""),
+            "thread_date": entry.get("thread_date", ""),
+            "thread_title": entry.get("thread_title", ""),
             "timestamp": entry.get("timestamp", ""),
             "question": entry.get("question", ""),
             "answer": entry.get("answer", ""),
@@ -973,6 +981,28 @@ def parse_lines(value: str) -> list:
     return items
 
 
+def normalize_chat_user_id(value: str) -> str:
+    return normalize_value(value, "").strip()
+
+
+def get_current_chat_user_id() -> str:
+    return normalize_chat_user_id(st.session_state.get("chat_user_id", ""))
+
+
+def get_chat_thread_key(user_id: str, thread_date: str, meeting_title: str, meeting_id: str) -> str:
+    return " | ".join(part for part in [user_id.lower(), thread_date, meeting_title.lower(), meeting_id.lower()] if part)
+
+
+def build_chat_thread_label(entry: dict) -> str:
+    thread_date = normalize_value(entry.get("thread_date"), "")
+    thread_title = normalize_value(entry.get("thread_title") or entry.get("meeting_title"), "General")
+    meeting_id = normalize_value(entry.get("meeting_id"), "")
+    label_parts = [thread_date or "No date", thread_title]
+    if meeting_id:
+        label_parts.append(meeting_id)
+    return " | ".join(label_parts)
+
+
 def find_meeting_by_id(meetings: list, meeting_id: str):
     if not meeting_id:
         return None
@@ -987,6 +1017,21 @@ def find_meeting_by_id(meetings: list, meeting_id: str):
 
 
 def render_dashboard_chat(meetings: list) -> None:
+    current_user_id = get_current_chat_user_id()
+    st.text_input(
+        "User ID",
+        key="chat_user_id",
+        placeholder="Enter your ID before chatting",
+        help="Chat history is private to this ID.",
+    )
+    if not current_user_id:
+        st.info("Enter your User ID to unlock private chat and history.")
+        return
+    if st.session_state.get("active_chat_user_id") != current_user_id:
+        st.session_state.active_chat_user_id = current_user_id
+        st.session_state.chat_history = []
+        st.session_state.chat_context_meeting_id = ""
+
     chat_history_box = st.container(height=420, border=False)
     with chat_history_box:
         st.markdown('<div class="chat-thread dashboard-chat-thread">', unsafe_allow_html=True)
@@ -1012,15 +1057,24 @@ def render_dashboard_chat(meetings: list) -> None:
             history_records = list(st.session_state.get("chat_history_records", []))
             meeting_id = normalize_value(st.session_state.get("chat_context_meeting_id"), "")
             context_meeting = find_meeting_by_id(meetings, meeting_id)
+            thread_date = normalize_value(
+                context_meeting.get("date") if context_meeting else today_str(),
+                today_str(),
+            )
+            thread_title = normalize_value(context_meeting.get("title"), "General") if context_meeting else "General"
             history_records.insert(
                 0,
                 {
                     "id": uid(),
+                    "user_id": current_user_id,
+                    "thread_key": get_chat_thread_key(current_user_id, thread_date, thread_title, meeting_id),
+                    "thread_date": thread_date,
+                    "thread_title": thread_title,
                     "timestamp": datetime.now().isoformat(timespec="seconds"),
                     "question": question.strip(),
                     "answer": answer.strip(),
                     "meeting_id": meeting_id,
-                    "meeting_title": normalize_value(context_meeting.get("title"), "") if context_meeting else "",
+                    "meeting_title": thread_title if context_meeting else "",
                     "context": "Meeting" if meeting_id else "General",
                 },
             )
@@ -2289,6 +2343,8 @@ def init_state():
         st.session_state.chat_history = []
     if "chat_history_records" not in st.session_state:
         st.session_state.chat_history_records = []
+    if "active_chat_user_id" not in st.session_state:
+        st.session_state.active_chat_user_id = ""
     if "pending_result" not in st.session_state:
         st.session_state.pending_result = None
     if "capture_transcript" not in st.session_state:
@@ -2957,6 +3013,17 @@ if st.session_state.current_page == "Tracker":
 if st.session_state.current_page == "History":
     st.subheader("Chat History")
     history_records = list(st.session_state.get("chat_history_records", []))
+    current_user_id = get_current_chat_user_id()
+
+    st.text_input(
+        "User ID",
+        key="chat_user_id",
+        placeholder="Enter your ID to view your history",
+        help="Only chats saved with the same ID will appear here.",
+    )
+    if not current_user_id:
+        st.info("Enter your User ID to unlock private chat history.")
+        st.stop()
 
     c1, c2 = st.columns([1.4, 0.8])
     with c1:
@@ -2974,7 +3041,12 @@ if st.session_state.current_page == "History":
             key="history_context_filter",
         )
 
-    filtered_history = history_records
+    user_history = [
+        entry
+        for entry in history_records
+        if normalize_chat_user_id(entry.get("user_id", "")).lower() == current_user_id.lower()
+    ]
+    filtered_history = user_history
     if history_context_filter != "All":
         filtered_history = [entry for entry in filtered_history if normalize_value(entry.get("context"), "General") == history_context_filter]
 
@@ -2995,33 +3067,53 @@ if st.session_state.current_page == "History":
             ).lower()
         ]
 
-    st.caption(f"Showing {len(filtered_history)} of {len(history_records)} saved chat entries.")
+    st.caption(f"Showing {len(filtered_history)} of {len(user_history)} saved chat entries for ID {current_user_id}.")
 
     if not filtered_history:
         st.info("No chat history found for the selected search.")
     else:
+        grouped_threads = {}
         for entry in filtered_history:
-            meeting_title = normalize_value(entry.get("meeting_title"), "General")
-            meeting_id = normalize_value(entry.get("meeting_id"), "")
-            with st.expander(f"{normalize_value(entry.get('timestamp'), 'No timestamp')} | {normalize_value(entry.get('question'), 'Untitled question')}"):
-                st.markdown(
-                    f"""
-                    <div class="search-result-card">
-                        <div class="search-result-top">
-                            <div>
-                                <div class="mini-title">Question</div>
-                                <div class="mini-copy">{normalize_value(entry.get('question'), 'Not stated')}</div>
-                            </div>
-                            <div class="result-pill">{normalize_value(entry.get('context'), 'General')}</div>
-                        </div>
-                        <div class="mini-title" style="margin-top:0.55rem;">Answer</div>
-                        <div class="mini-copy">{normalize_value(entry.get('answer'), 'No answer saved.')}</div>
-                        <div style="margin-top:0.65rem;" class="mini-copy">
-                            Meeting: {meeting_title if meeting_title else 'None'}<br>
-                            Meeting ID: {meeting_id if meeting_id else 'None'}<br>
-                            Saved at: {normalize_value(entry.get('timestamp'), 'Unknown')}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+            thread_key = normalize_value(entry.get("thread_key"), "")
+            if not thread_key:
+                thread_key = get_chat_thread_key(
+                    current_user_id,
+                    normalize_value(entry.get("thread_date"), normalize_value(entry.get("timestamp"), "")[:10]),
+                    normalize_value(entry.get("thread_title") or entry.get("meeting_title"), "General"),
+                    normalize_value(entry.get("meeting_id"), ""),
                 )
+            grouped_threads.setdefault(thread_key, []).append(entry)
+
+        sorted_threads = sorted(
+            grouped_threads.items(),
+            key=lambda item: max(normalize_value(entry.get("timestamp"), "") for entry in item[1]),
+            reverse=True,
+        )
+
+        for thread_key, entries in sorted_threads:
+            entries = sorted(entries, key=lambda item: normalize_value(item.get("timestamp"), ""))
+            thread_head = entries[-1]
+            thread_label = build_chat_thread_label(thread_head)
+            with st.expander(thread_label):
+                for entry in entries:
+                    st.markdown(
+                        f"""
+                        <div class="search-result-card">
+                            <div class="search-result-top">
+                                <div>
+                                    <div class="mini-title">Question</div>
+                                    <div class="mini-copy">{normalize_value(entry.get('question'), 'Not stated')}</div>
+                                </div>
+                                <div class="result-pill">{normalize_value(entry.get('context'), 'General')}</div>
+                            </div>
+                            <div class="mini-title" style="margin-top:0.55rem;">Answer</div>
+                            <div class="mini-copy">{normalize_value(entry.get('answer'), 'No answer saved.')}</div>
+                            <div style="margin-top:0.65rem;" class="mini-copy">
+                                Meeting: {normalize_value(entry.get('meeting_title'), 'General')}<br>
+                                Meeting ID: {normalize_value(entry.get('meeting_id'), 'None')}<br>
+                                Saved at: {normalize_value(entry.get('timestamp'), 'Unknown')}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
