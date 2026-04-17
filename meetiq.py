@@ -22,6 +22,8 @@ from meetiq_constants import (
     DEFAULT_DEPARTMENTS,
     DEPARTMENTS_SHEET_NAME,
     DEPARTMENT_SHEET_COLUMNS,
+    HISTORY_SHEET_COLUMNS,
+    HISTORY_SHEET_NAME,
     LINK_PHOTO_OPTIONS,
     MAIN_ACTIVITY_OPTIONS,
     MEETINGS_SHEET_NAME,
@@ -138,7 +140,7 @@ def sync_page_from_query():
     except Exception:
         return
 
-    if page_value in {"Dashboard", "Capture", "Tracker"}:
+    if page_value in {"Dashboard", "Capture", "Tracker", "History"}:
         st.session_state.current_page = page_value
     if focus_value in {"all", "open", "done"}:
         st.session_state.tracker_focus = focus_value
@@ -158,7 +160,7 @@ def clear_capture_inputs():
     st.session_state.capture_updated_by = ""
 
 
-def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFrame):
+def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFrame, history_df: pd.DataFrame | None = None):
     meetings = []
     if not meetings_df.empty:
         for row in meetings_df.fillna("").to_dict("records"):
@@ -231,7 +233,22 @@ def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFr
                 }
             )
 
-    return meetings, departments
+    history = []
+    if history_df is not None and not history_df.empty:
+        for row in history_df.fillna("").to_dict("records"):
+            history.append(
+                {
+                    "id": first_nonempty(row, "id", fallback=""),
+                    "timestamp": first_nonempty(row, "timestamp", fallback=""),
+                    "question": first_nonempty(row, "question", fallback=""),
+                    "answer": first_nonempty(row, "answer", fallback=""),
+                    "meeting_id": first_nonempty(row, "meeting_id", fallback=""),
+                    "meeting_title": first_nonempty(row, "meeting_title", fallback=""),
+                    "context": first_nonempty(row, "context", fallback=""),
+                }
+            )
+
+    return meetings, departments, history
 
 
 def build_meeting_rows(meetings: list) -> list:
@@ -314,9 +331,24 @@ def build_department_rows(departments: list) -> list:
     ]
 
 
+def build_history_rows(history: list) -> list:
+    return [
+        {
+            "id": entry.get("id", ""),
+            "timestamp": entry.get("timestamp", ""),
+            "question": entry.get("question", ""),
+            "answer": entry.get("answer", ""),
+            "meeting_id": entry.get("meeting_id", ""),
+            "meeting_title": entry.get("meeting_title", ""),
+            "context": entry.get("context", ""),
+        }
+        for entry in history
+    ]
+
+
 def load_excel_data():
     if not os.path.exists(DATA_FILE):
-        return [], []
+        return [], [], []
 
     try:
         meetings_df = pd.read_excel(DATA_FILE, sheet_name=MEETINGS_SHEET_NAME)
@@ -328,16 +360,23 @@ def load_excel_data():
     except Exception:
         departments_df = pd.DataFrame()
 
-    return parse_loaded_dataframes(meetings_df, departments_df)
+    try:
+        history_df = pd.read_excel(DATA_FILE, sheet_name=HISTORY_SHEET_NAME)
+    except Exception:
+        history_df = pd.DataFrame()
+
+    return parse_loaded_dataframes(meetings_df, departments_df, history_df)
 
 
 def save_excel_data(meetings: list, departments: list):
+    history_rows = build_history_rows(st.session_state.get("chat_history_records", []))
     meetings_rows = build_meeting_rows(meetings)
     departments_rows = build_department_rows(departments)
 
     with pd.ExcelWriter(DATA_FILE, engine="openpyxl") as writer:
         pd.DataFrame(meetings_rows, columns=MEETING_SHEET_COLUMNS).to_excel(writer, sheet_name=MEETINGS_SHEET_NAME, index=False)
         pd.DataFrame(departments_rows, columns=DEPARTMENT_SHEET_COLUMNS).to_excel(writer, sheet_name=DEPARTMENTS_SHEET_NAME, index=False)
+        pd.DataFrame(history_rows, columns=HISTORY_SHEET_COLUMNS).to_excel(writer, sheet_name=HISTORY_SHEET_NAME, index=False)
 
 
 @st.cache_resource
@@ -379,9 +418,11 @@ def load_google_sheet_data():
     try:
         meetings_ws = get_or_create_google_worksheet(spreadsheet, MEETINGS_SHEET_NAME, MEETING_SHEET_COLUMNS)
         departments_ws = get_or_create_google_worksheet(spreadsheet, DEPARTMENTS_SHEET_NAME, DEPARTMENT_SHEET_COLUMNS)
+        history_ws = get_or_create_google_worksheet(spreadsheet, HISTORY_SHEET_NAME, HISTORY_SHEET_COLUMNS)
         meetings_df = pd.DataFrame(meetings_ws.get_all_records())
         departments_df = pd.DataFrame(departments_ws.get_all_records())
-        return parse_loaded_dataframes(meetings_df, departments_df)
+        history_df = pd.DataFrame(history_ws.get_all_records())
+        return parse_loaded_dataframes(meetings_df, departments_df, history_df)
     except Exception:
         return None
 
@@ -395,6 +436,7 @@ def save_google_sheet_data(meetings: list, departments: list):
 
     meetings_rows = build_meeting_rows(meetings)
     departments_rows = build_department_rows(departments)
+    history_rows = build_history_rows(st.session_state.get("chat_history_records", []))
 
     meetings_ws = get_or_create_google_worksheet(spreadsheet, MEETINGS_SHEET_NAME, MEETING_SHEET_COLUMNS)
     meetings_values = [MEETING_SHEET_COLUMNS] + [
@@ -411,6 +453,14 @@ def save_google_sheet_data(meetings: list, departments: list):
     ]
     departments_ws.clear()
     departments_ws.update("A1", departments_values)
+
+    history_ws = get_or_create_google_worksheet(spreadsheet, HISTORY_SHEET_NAME, HISTORY_SHEET_COLUMNS)
+    history_values = [HISTORY_SHEET_COLUMNS] + [
+        [row.get(column, "") for column in HISTORY_SHEET_COLUMNS]
+        for row in history_rows
+    ]
+    history_ws.clear()
+    history_ws.update("A1", history_values)
 
 
 def supabase_headers(prefer: str = "") -> dict | None:
@@ -439,6 +489,7 @@ def load_supabase_data():
     headers = supabase_headers()
     meetings_url = supabase_table_url(MEETINGS_SHEET_NAME)
     departments_url = supabase_table_url(DEPARTMENTS_SHEET_NAME)
+    history_url = supabase_table_url(HISTORY_SHEET_NAME)
     if headers is None or meetings_url is None or departments_url is None:
         return None
 
@@ -449,7 +500,15 @@ def load_supabase_data():
         departments_response.raise_for_status()
         meetings_df = pd.DataFrame(meetings_response.json())
         departments_df = pd.DataFrame(departments_response.json())
-        return parse_loaded_dataframes(meetings_df, departments_df)
+        history_df = pd.DataFrame()
+        if history_url is not None:
+            try:
+                history_response = requests.get(history_url, headers=headers, params={"select": "*"}, timeout=30)
+                history_response.raise_for_status()
+                history_df = pd.DataFrame(history_response.json())
+            except Exception:
+                history_df = pd.DataFrame()
+        return parse_loaded_dataframes(meetings_df, departments_df, history_df)
     except Exception:
         return None
 
@@ -474,8 +533,13 @@ def replace_supabase_table(table_name: str, rows: list, columns: list):
 def save_supabase_data(meetings: list, departments: list):
     meeting_rows = build_meeting_rows(meetings)
     department_rows = build_department_rows(departments)
+    history_rows = build_history_rows(st.session_state.get("chat_history_records", []))
     replace_supabase_table(MEETINGS_SHEET_NAME, meeting_rows, MEETING_SHEET_COLUMNS)
     replace_supabase_table(DEPARTMENTS_SHEET_NAME, department_rows, DEPARTMENT_SHEET_COLUMNS)
+    try:
+        replace_supabase_table(HISTORY_SHEET_NAME, history_rows, HISTORY_SHEET_COLUMNS)
+    except Exception:
+        pass
 
 
 def load_app_data():
@@ -489,7 +553,9 @@ def load_app_data():
     return load_excel_data()
 
 
-def save_app_data(meetings: list, departments: list):
+def save_app_data(meetings: list, departments: list, history: list | None = None):
+    if history is not None:
+        st.session_state.chat_history_records = history
     if supabase_headers() is not None:
         save_supabase_data(meetings, departments)
     elif get_google_spreadsheet() is not None:
@@ -499,7 +565,7 @@ def save_app_data(meetings: list, departments: list):
 
 
 def persist_app_data():
-    save_app_data(st.session_state.meetings, st.session_state.departments)
+    save_app_data(st.session_state.meetings, st.session_state.departments, st.session_state.get("chat_history_records", []))
 
 
 def seed_default_departments():
@@ -888,6 +954,20 @@ def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
         key=f"{key_prefix}_body",
     )
 
+
+def find_meeting_by_id(meetings: list, meeting_id: str):
+    if not meeting_id:
+        return None
+    return next(
+        (
+            meeting
+            for meeting in meetings
+            if normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), "") == meeting_id
+        ),
+        None,
+    )
+
+
 def render_dashboard_chat(meetings: list) -> None:
     chat_history_box = st.container(height=420, border=False)
     with chat_history_box:
@@ -910,6 +990,26 @@ def render_dashboard_chat(meetings: list) -> None:
         except Exception as exc:
             answer = f"Error: {exc}"
         st.session_state.chat_history.append({"role": "assistant", "text": answer})
+        try:
+            history_records = list(st.session_state.get("chat_history_records", []))
+            meeting_id = normalize_value(st.session_state.get("chat_context_meeting_id"), "")
+            context_meeting = find_meeting_by_id(meetings, meeting_id)
+            history_records.insert(
+                0,
+                {
+                    "id": uid(),
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "question": question.strip(),
+                    "answer": answer.strip(),
+                    "meeting_id": meeting_id,
+                    "meeting_title": normalize_value(context_meeting.get("title"), "") if context_meeting else "",
+                    "context": "Meeting" if meeting_id else "General",
+                },
+            )
+            st.session_state.chat_history_records = history_records
+            persist_app_data()
+        except Exception:
+            pass
         st.rerun()
 
 
@@ -2095,9 +2195,10 @@ st.markdown(
 
 def init_state():
     if "data_loaded" not in st.session_state:
-        meetings, departments = load_app_data()
+        meetings, departments, history_records = load_app_data()
         st.session_state.meetings = meetings
         st.session_state.departments = departments
+        st.session_state.chat_history_records = history_records
         st.session_state.data_loaded = True
     if "meetings" not in st.session_state:
         st.session_state.meetings = []
@@ -2105,6 +2206,8 @@ def init_state():
         st.session_state.departments = []
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    if "chat_history_records" not in st.session_state:
+        st.session_state.chat_history_records = []
     if "pending_result" not in st.session_state:
         st.session_state.pending_result = None
     if "capture_transcript" not in st.session_state:
@@ -2113,7 +2216,7 @@ def init_state():
         st.session_state.capture_activity_id = ""
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Dashboard"
-    elif st.session_state.current_page not in {"Dashboard", "Capture", "Tracker"}:
+    elif st.session_state.current_page not in {"Dashboard", "Capture", "Tracker", "History"}:
         st.session_state.current_page = "Dashboard"
     if "tracker_focus" not in st.session_state:
         st.session_state.tracker_focus = "all"
@@ -2157,6 +2260,14 @@ with st.sidebar:
         type="primary" if st.session_state.current_page == "Capture" else "secondary",
         on_click=set_current_page,
         args=("Capture",),
+    )
+    st.button(
+        "History",
+        key="nav_history",
+        use_container_width=True,
+        type="primary" if st.session_state.current_page == "History" else "secondary",
+        on_click=set_current_page,
+        args=("History",),
     )
 
 
@@ -2761,3 +2872,80 @@ if st.session_state.current_page == "Tracker":
                         render_action_card(action, editable=True, persist_callback=persist_app_data)
                 else:
                     st.success("No action item. This meeting is considered completed.")
+
+
+# ============================================================
+# Section 10. History Tab
+# ============================================================
+
+if st.session_state.current_page == "History":
+    st.subheader("Chat History")
+    history_records = list(st.session_state.get("chat_history_records", []))
+
+    c1, c2 = st.columns([1.4, 0.8])
+    with c1:
+        history_search = st.text_input(
+            "Search history",
+            placeholder="Search by question, answer, meeting title, or context",
+            key="history_search",
+        )
+    with c2:
+        history_context_options = ["All", "Meeting", "General"]
+        history_context_filter = st.selectbox(
+            "Context",
+            history_context_options,
+            index=0,
+            key="history_context_filter",
+        )
+
+    filtered_history = history_records
+    if history_context_filter != "All":
+        filtered_history = [entry for entry in filtered_history if normalize_value(entry.get("context"), "General") == history_context_filter]
+
+    search_needle = history_search.strip().lower()
+    if search_needle:
+        filtered_history = [
+            entry
+            for entry in filtered_history
+            if search_needle in " ".join(
+                [
+                    normalize_value(entry.get("timestamp"), ""),
+                    normalize_value(entry.get("question"), ""),
+                    normalize_value(entry.get("answer"), ""),
+                    normalize_value(entry.get("meeting_title"), ""),
+                    normalize_value(entry.get("meeting_id"), ""),
+                    normalize_value(entry.get("context"), ""),
+                ]
+            ).lower()
+        ]
+
+    st.caption(f"Showing {len(filtered_history)} of {len(history_records)} saved chat entries.")
+
+    if not filtered_history:
+        st.info("No chat history found for the selected search.")
+    else:
+        for entry in filtered_history:
+            meeting_title = normalize_value(entry.get("meeting_title"), "General")
+            meeting_id = normalize_value(entry.get("meeting_id"), "")
+            with st.expander(f"{normalize_value(entry.get('timestamp'), 'No timestamp')} | {normalize_value(entry.get('question'), 'Untitled question')}"):
+                st.markdown(
+                    f"""
+                    <div class="search-result-card">
+                        <div class="search-result-top">
+                            <div>
+                                <div class="mini-title">Question</div>
+                                <div class="mini-copy">{normalize_value(entry.get('question'), 'Not stated')}</div>
+                            </div>
+                            <div class="result-pill">{normalize_value(entry.get('context'), 'General')}</div>
+                        </div>
+                        <div class="mini-title" style="margin-top:0.55rem;">Answer</div>
+                        <div class="mini-copy">{normalize_value(entry.get('answer'), 'No answer saved.')}</div>
+                        <div style="margin-top:0.65rem;" class="mini-copy">
+                            Meeting: {meeting_title if meeting_title else 'None'}<br>
+                            Meeting ID: {meeting_id if meeting_id else 'None'}<br>
+                            Saved at: {normalize_value(entry.get('timestamp'), 'Unknown')}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
