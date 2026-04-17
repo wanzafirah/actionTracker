@@ -115,7 +115,7 @@ def render_summary_panel(result: dict) -> None:
     nlp = result.get("nlp_pipeline", {})
     people_count = len([text for item in nlp.get("named_entities", {}).get("persons", []) if (text := _entity_text(item))])
     action_count = len(result.get("action_items", []))
-    decision_count = len(result.get("key_decisions", []))
+    discussion_count = len(result.get("discussion_points", []))
     st.markdown(
         f"""
         <div class="hero-panel">
@@ -134,6 +134,6 @@ def render_summary_panel(result: dict) -> None:
     with k1:
         render_kpi_card("Action Items", str(action_count), "Extracted tasks", "#0f766e")
     with k2:
-        render_kpi_card("Decisions", str(decision_count), "Decision signals", "#2563eb")
+        render_kpi_card("Discussion", str(discussion_count), "Main topics", "#2563eb")
     with k3:
         render_kpi_card("People", str(people_count), "People involved", "#d97706")
