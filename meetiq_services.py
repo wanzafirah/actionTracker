@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+from urllib.parse import urlparse, urlunparse
 
 import pandas as pd
 import requests
@@ -30,7 +31,27 @@ def get_ollama_url() -> str:
         secret_value = st.secrets.get("OLLAMA_URL", "")
     except Exception:
         secret_value = ""
-    return os.getenv("OLLAMA_URL", secret_value or "http://127.0.0.1:11434/api/generate")
+    return normalize_ollama_url(os.getenv("OLLAMA_URL", secret_value or "http://127.0.0.1:11434/api/generate"))
+
+
+def normalize_ollama_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return "http://127.0.0.1:11434/api/generate"
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url.rstrip("/") or "http://127.0.0.1:11434/api/generate"
+    path = (parsed.path or "").rstrip("/")
+    if not path:
+        parsed = parsed._replace(path="/api/generate")
+        return urlunparse(parsed)
+    return url.rstrip("/")
+
+
+def _ollama_post(url: str, payload: dict, headers: dict, timeout: int = 300) -> requests.Response:
+    response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return response
 
 
 def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
@@ -46,12 +67,31 @@ def call_ollama(system: str, user_msg: str, max_tokens: int = 2000) -> str:
         "options": {"num_predict": max_tokens, "num_ctx": 2048, "temperature": 0.1, "top_p": 0.9},
     }
     try:
-        response = requests.post(ollama_url, json=payload, headers=headers, timeout=300)
-        response.raise_for_status()
+        response = _ollama_post(ollama_url, payload, headers=headers, timeout=300)
         return response.json().get("response", "")
     except requests.HTTPError as exc:
         status_code = exc.response.status_code if exc.response is not None else "unknown"
         detail = exc.response.text[:500] if exc.response is not None else str(exc)
+        if status_code == 404:
+            fallback_url = ollama_url.rstrip("/")
+            if fallback_url.endswith("/api/generate"):
+                alt_url = fallback_url.rsplit("/api/generate", 1)[0] + "/api/chat"
+                alt_payload = {
+                    "model": OLLAMA_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "stream": False,
+                    "options": {"num_predict": max_tokens, "num_ctx": 2048, "temperature": 0.1, "top_p": 0.9},
+                }
+                try:
+                    alt_response = _ollama_post(alt_url, alt_payload, headers=headers, timeout=300)
+                    data = alt_response.json()
+                    message = data.get("message") or {}
+                    return message.get("content", "") or data.get("response", "")
+                except Exception:
+                    pass
         raise RuntimeError(f"Ollama request failed with status {status_code}. {detail}") from exc
     except requests.RequestException as exc:
         raise RuntimeError(
