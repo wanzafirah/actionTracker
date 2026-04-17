@@ -6,6 +6,7 @@ WHISPER_MODEL = "tiny"
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetiq_data.xlsx")
 MEETINGS_SHEET_NAME = "meetings"
 DEPARTMENTS_SHEET_NAME = "departments"
+HISTORY_SHEET_NAME = "history"
 
 MEETING_SHEET_COLUMNS = [
     "id",
@@ -66,6 +67,15 @@ MEETING_SHEET_COLUMNS = [
 ]
 
 DEPARTMENT_SHEET_COLUMNS = ["id", "name", "budget"]
+HISTORY_SHEET_COLUMNS = [
+    "id",
+    "timestamp",
+    "question",
+    "answer",
+    "meeting_id",
+    "meeting_title",
+    "context",
+]
 
 STATUSES = ["Pending", "In Progress", "Done", "Overdue", "Cancelled"]
 MTG_TYPES = ["Virtual", "Physical", "Not Provided"]
