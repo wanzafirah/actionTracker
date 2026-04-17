@@ -1211,17 +1211,22 @@ def chat_with_meetings(question: str, meetings: list) -> str:
     }
 
     def meeting_search_blob(meeting: dict) -> str:
+        title = normalize_value(meeting.get("title"), "")
+        summary = normalize_value(meeting.get("summary"), "")
+        outcome = normalize_value(meeting.get("outcome"), "")
+        activity_id = normalize_value(meeting.get("meetingID"), "") or normalize_value(meeting.get("activityId"), "")
+        uppercase_tokens = re.findall(r"\b[A-Z]{2,}\b", f"{title} {summary} {outcome}")
         return " ".join(
             [
-                normalize_value(meeting.get("title"), ""),
-                normalize_value(meeting.get("summary"), ""),
-                normalize_value(meeting.get("outcome"), ""),
-                normalize_value(meeting.get("meetingID"), ""),
-                normalize_value(meeting.get("activityId"), ""),
+                title,
+                summary,
+                outcome,
+                activity_id,
                 join_list(meeting.get("stakeholders", []), ""),
                 join_list(meeting.get("companies", []), ""),
                 join_list(meeting.get("discussionPoints", []), ""),
                 join_list(meeting.get("keyDecisions", []), ""),
+                " ".join(uppercase_tokens),
             ]
         ).lower()
 
@@ -1229,6 +1234,11 @@ def chat_with_meetings(question: str, meetings: list) -> str:
     for meeting in meetings:
         blob = meeting_search_blob(meeting)
         score = sum(1 for token in question_tokens if token in blob)
+        title = normalize_value(meeting.get("title"), "").lower()
+        companies_blob = join_list(meeting.get("companies", []), "").lower()
+        stakeholders_blob = join_list(meeting.get("stakeholders", []), "").lower()
+        if any(token in title or token in companies_blob or token in stakeholders_blob for token in question_tokens):
+            score += 2
         if score > 0:
             scored_meetings.append((score, meeting))
 
@@ -2390,14 +2400,14 @@ if st.session_state.current_page == "Dashboard":
                 st.info("No upcoming projects found.")
             else:
                 for meeting in upcoming_meetings:
-                    with st.expander(normalize_value(meeting.get("title"), "Untitled")):
-                        report_by_value = normalize_value(meeting.get("updatedBy") or meeting.get("updated by"), "Not stated")
+                    report_by_value = normalize_value(meeting.get("updatedBy") or meeting.get("updated by"), "Not stated")
+                    expander_title = f"{normalize_value(meeting.get('title'), 'Untitled')} | Report by: {report_by_value}"
+                    with st.expander(expander_title):
                         st.markdown(
                             f"""
                             <div class="upcoming-item">
                                 <div class="upcoming-top">
                                     <div>
-                                        <div class="mini-copy"><strong>Report by:</strong> {report_by_value}</div>
                                         <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
                                     </div>
                                     <div class="upcoming-date">{normalize_value(meeting.get('date'), 'No date')}</div>
