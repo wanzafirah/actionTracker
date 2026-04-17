@@ -32,6 +32,7 @@ _RECENT_UPDATE_IDS: set[int] = set()
 _RECENT_MESSAGE_KEYS: set[str] = set()
 _RECENT_CACHE_LIMIT = 500
 NO_REPLY = "__NO_REPLY__"
+_CHAT_SESSION_VERSION: dict[str, int] = {}
 
 
 def get_telegram_token() -> str:
@@ -241,6 +242,51 @@ def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
     if len(summary) > limit:
         return summary[:limit].rsplit(" ", 1)[0].rstrip(".,;:") + "..."
     return summary
+
+
+def extract_explicit_action_items_from_text(raw_text: str) -> list[dict]:
+    lines = [line.strip() for line in str(raw_text or "").splitlines()]
+    action_start = None
+    for index, line in enumerate(lines):
+        lowered = line.lower()
+        if lowered.startswith("action items") or lowered.startswith("action item") or lowered.startswith("next steps"):
+            action_start = index + 1
+            break
+
+    if action_start is None:
+        return []
+
+    collected = []
+    for line in lines[action_start:]:
+        lowered = line.lower().strip()
+        if not lowered:
+            if collected:
+                break
+            continue
+        if lowered.startswith(("summary:", "objective:", "outcome:", "stakeholders:", "meeting:", "recap:")):
+            break
+        if lowered.startswith(("-", "*", "•")) or re.match(r"^\d+[\.\)]\s+", lowered):
+            item = re.sub(r"^[-*•]\s*", "", line).strip()
+            item = re.sub(r"^\d+[\.\)]\s*", "", item).strip()
+            if item:
+                collected.append(
+                    {
+                        "text": item,
+                        "owner": "Not stated",
+                        "department": "Not stated",
+                        "deadline": "None",
+                        "status": "Pending",
+                        "suggestion": "",
+                        "priority": "Medium",
+                        "follow_up_required": True,
+                        "follow_up_reason": "Explicit action item listed in the submission.",
+                        "ner_entities": [],
+                    }
+                )
+        elif collected and not line.startswith((" ", "\t")):
+            break
+
+    return collected
 
 
 def extract_people_from_text(raw_text: str) -> list[str]:
@@ -536,11 +582,8 @@ Rules:
 - The summary should be 2 to 4 short sentences and capture the main context, decision, and next step.
 - The objective should reflect what the meeting was trying to achieve.
 - The outcome should say what was decided, agreed, or what remains pending.
-- Keep action items concrete and tied to the source text.
-- If someone is assigned the work, put that person's name in owner.
-- If a department should do the work, put the department in department.
-- If no exact deadline is stated, use "None".
-- If the text contains follow-up work, set follow_up to true.
+- Only create action items when they are explicitly written in the text or clearly stated as a task/request.
+- Do not invent action items from general discussion.
 - Only list people in stakeholders; do not put organizations or companies in stakeholders.
 - Only list companies or organizations in companies.
 """
@@ -559,9 +602,8 @@ Rules:
     parsed["outcome"] = normalize_value(parsed.get("outcome"), "") or "Meeting recap captured from the submitted text."
     parsed["key_decisions"] = dedupe_preserve_order(parsed.get("key_decisions", []) or fallback_key_decisions(raw_text))
     parsed["discussion_points"] = dedupe_preserve_order(parsed.get("discussion_points", []) or fallback_discussion_points(raw_text))
-    action_items = parsed.get("action_items", []) or []
-    if not action_items and has_action_signals(raw_text):
-        action_items = fallback_action_items(raw_text)
+    explicit_actions = extract_explicit_action_items_from_text(raw_text)
+    action_items = explicit_actions if explicit_actions else ([] if not has_action_signals(raw_text) else fallback_action_items(raw_text))
     parsed["action_items"] = action_items
     parsed["stakeholders"] = dedupe_preserve_order((parsed.get("stakeholders", []) or []) + extract_people_from_text(raw_text))
     parsed["companies"] = dedupe_preserve_order((parsed.get("companies", []) or []) + extract_organization_candidates(raw_text))
@@ -846,6 +888,16 @@ def _remember_recent_key(store: set, key) -> bool:
     return True
 
 
+def get_chat_session_version(chat_id: int | str) -> int:
+    return _CHAT_SESSION_VERSION.get(str(chat_id), 0)
+
+
+def bump_chat_session_version(chat_id: int | str) -> int:
+    key = str(chat_id)
+    _CHAT_SESSION_VERSION[key] = _CHAT_SESSION_VERSION.get(key, 0) + 1
+    return _CHAT_SESSION_VERSION[key]
+
+
 def save_meeting_and_history(
     *,
     user_id: str,
@@ -943,20 +995,24 @@ def should_treat_as_question(text: str) -> bool:
 
 def handle_text_message(user_id: str, text: str) -> str:
     cleaned = text.strip()
+    cleaned_lower = cleaned.lower()
     if cleaned.lower().startswith("/start"):
         return (
             "Send me a long meeting note, PDF, DOCX, CSV, XLSX, or audio/voice file and I will summarise it.\n"
             "You can also ask me about past meeting recaps, pending actions, or follow-up items."
         )
 
-    if cleaned.lower() in {"/end", "/stop", "/cancel"}:
+    if cleaned_lower in {"/end", "/stop", "/cancel", "end", "stop", "cancel", "start"}:
         return NO_REPLY
 
-    if cleaned.lower().startswith("/ask"):
+    if cleaned_lower.startswith("/ask"):
         cleaned = cleaned[4:].strip()
 
     if cleaned.startswith("/"):
         return "Unknown command. Send a meeting note, file, or ask a recap question."
+
+    if len(cleaned) < 20 and not should_treat_as_question(cleaned):
+        return "Please send the full meeting recap text, or ask a clear question about a meeting."
 
     if should_treat_as_question(cleaned):
         meetings = load_user_meetings(user_id)
@@ -991,37 +1047,48 @@ async def process_telegram_update(update: dict) -> None:
     from_user = message.get("from") or {}
     user_id = str(from_user.get("id", chat_id or ""))
     message_id = message.get("message_id")
+    session_version = get_chat_session_version(chat_id)
 
     try:
         if message.get("voice"):
             voice = message["voice"]
             file_obj = download_telegram_file(voice["file_id"], "voice.ogg")
             answer = process_file_submission(user_id, file_obj)
-            send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
+            if get_chat_session_version(chat_id) == session_version:
+                send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         elif message.get("audio"):
             audio = message["audio"]
             file_name = audio.get("file_name") or "audio.mp3"
             file_obj = download_telegram_file(audio["file_id"], file_name)
             answer = process_file_submission(user_id, file_obj)
-            send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
+            if get_chat_session_version(chat_id) == session_version:
+                send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         elif message.get("document"):
             doc = message["document"]
             file_name = doc.get("file_name") or "document.bin"
             file_obj = download_telegram_file(doc["file_id"], file_name)
             answer = process_file_submission(user_id, file_obj)
-            send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
+            if get_chat_session_version(chat_id) == session_version:
+                send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         elif message.get("text"):
-            answer = handle_text_message(user_id, message["text"])
-            if answer != NO_REPLY:
+            text = message["text"].strip()
+            if text.lower() in {"/end", "/stop", "/cancel", "end", "stop", "cancel"}:
+                bump_chat_session_version(chat_id)
+                return
+
+            answer = handle_text_message(user_id, text)
+            if answer != NO_REPLY and get_chat_session_version(chat_id) == session_version:
                 send_telegram_message(chat_id, answer, reply_to_message_id=message_id)
         else:
-            send_telegram_message(
-                chat_id,
-                "Send text, a voice note, or a document and I will summarise it or answer meeting questions.",
-                reply_to_message_id=message_id,
-            )
+            if get_chat_session_version(chat_id) == session_version:
+                send_telegram_message(
+                    chat_id,
+                    "Send text, a voice note, or a document and I will summarise it or answer meeting questions.",
+                    reply_to_message_id=message_id,
+                )
     except Exception as exc:
-        send_telegram_message(chat_id, f"Sorry, I could not process that message: {exc}", reply_to_message_id=message_id)
+        if get_chat_session_version(chat_id) == session_version:
+            send_telegram_message(chat_id, f"Sorry, I could not process that message: {exc}", reply_to_message_id=message_id)
 
 
 @app.get("/health")
