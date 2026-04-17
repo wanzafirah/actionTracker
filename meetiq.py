@@ -635,11 +635,13 @@ def is_objective_only_transcript(text: str) -> bool:
 
 
 def make_action_preview_item(action: dict, action_id: str, status: str = "Pending") -> dict:
+    department = normalize_value(action.get("department") or action.get("company"), "Not stated")
     return {
         "id": action_id,
         "text": normalize_value(action.get("text"), "Untitled action"),
         "owner": normalize_value(action.get("owner"), "Not stated"),
-        "company": normalize_value(action.get("company"), "Internal"),
+        "department": department,
+        "company": department,
         "deadline": normalize_value(action.get("deadline"), "None"),
         "priority": action.get("priority", "Medium"),
         "status": status,
@@ -757,10 +759,7 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
         "activityObjective": pending.get("activity_objective", ""),
         "actions": (
             [
-                {
-                    **action,
-                    "id": f"{meeting_id}_a{index}",
-                }
+                {**action, "id": f"{meeting_id}_a{index}", "department": normalize_value(action.get("department") or action.get("company"), "Not stated")}
                 for index, action in enumerate(preview_actions)
             ]
             if preview_actions
@@ -783,13 +782,14 @@ def filter_meeting_library(meetings: list, search_text: str) -> list:
     return filtered
 
 
-def filter_action_records(action_df: pd.DataFrame, company_filter: str, status_filter: str, action_search: str) -> pd.DataFrame:
+def filter_action_records(action_df: pd.DataFrame, department_filter: str, status_filter: str, action_search: str) -> pd.DataFrame:
     filtered_actions = action_df.copy()
-    if company_filter != "All":
-        company_needle = company_filter.lower()
+    if department_filter != "All":
+        department_needle = department_filter.lower()
+        department_column = filtered_actions["department"] if "department" in filtered_actions.columns else filtered_actions["company"]
         filtered_actions = filtered_actions[
-            (filtered_actions["company"].str.lower() == company_needle)
-            | (filtered_actions["meeting_title"].str.lower().str.contains(company_needle))
+            (department_column.str.lower() == department_needle)
+            | (filtered_actions["meeting_title"].str.lower().str.contains(department_needle))
         ]
     if status_filter != "All":
         filtered_actions = filtered_actions[filtered_actions["status"] == status_filter]
@@ -928,8 +928,8 @@ Goals:
 Rules:
 - Treat only explicitly stated tasks, requests, assignments, and pending items as action items.
 - Do not infer hidden or implied tasks from general discussion or meeting purpose.
-- Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another company, do not place it in action_items.
-- External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
+ - Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another organization, do not place it in action_items.
+ - External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
 - Always return at least 1-3 discussion_points when the transcript contains actual meeting content.
 - discussion_points should capture the main topics discussed, reviewed, aligned, explored, or presented.
 - Return key_decisions only when the transcript clearly states a decision, agreement, confirmation, or approval.
@@ -970,7 +970,7 @@ Return this schema only:
     {
       "text": "string",
       "owner": "Not stated",
-      "company": "string",
+      "department": "string",
       "deadline": "None",
       "priority": "High|Medium|Low",
       "follow_up_required": true,
@@ -1109,12 +1109,138 @@ def normalize_pipeline_result(result: dict, transcript: str, metadata: dict | No
     for key in ("key_decisions", "discussion_points", "action_items"):
         if not isinstance(merged.get(key), list):
             merged[key] = safe[key]
+    if isinstance(merged.get("action_items"), list):
+        normalized_actions = []
+        for action in merged["action_items"]:
+            if isinstance(action, dict):
+                normalized_action = dict(action)
+                department_value = normalize_value(
+                    normalized_action.get("department") or normalized_action.get("company"),
+                    "Not stated",
+                )
+                normalized_action["department"] = department_value
+                normalized_action["company"] = department_value
+                normalized_actions.append(normalized_action)
+            else:
+                normalized_actions.append(action)
+        merged["action_items"] = normalized_actions
     for key in ("title", "meeting_type", "category", "objective", "summary", "outcome", "budget_notes"):
         merged[key] = normalize_value(merged.get(key), safe[key])
     merged["estimated_budget"] = merged.get("estimated_budget", 0) or 0
     merged["follow_up"] = parse_yes_no(merged.get("follow_up"))
     merged["follow_up_reason"] = normalize_value(merged.get("follow_up_reason"), "")
     return merged
+
+
+def _meeting_context_id(meeting: dict) -> str:
+    return normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), "")
+
+
+def _meeting_context_text(meeting: dict) -> str:
+    action_texts = []
+    for action in meeting.get("actions", []):
+        if isinstance(action, dict):
+            action_texts.append(
+                " ".join(
+                    [
+                        normalize_value(action.get("text"), ""),
+                        normalize_value(action.get("owner"), ""),
+                        normalize_value(action.get("department") or action.get("company"), ""),
+                        normalize_value(action.get("deadline"), ""),
+                        normalize_value(action.get("status"), ""),
+                        normalize_value(action.get("suggestion"), ""),
+                    ]
+                )
+            )
+        else:
+            action_texts.append(normalize_value(action, ""))
+    return " ".join(
+        [
+            normalize_value(meeting.get("title"), ""),
+            normalize_value(meeting.get("summary"), ""),
+            normalize_value(meeting.get("recaps"), ""),
+            normalize_value(meeting.get("objective"), ""),
+            normalize_value(meeting.get("outcome"), ""),
+            normalize_value(meeting.get("meetingID"), ""),
+            normalize_value(meeting.get("activityId"), ""),
+            normalize_value(meeting.get("deptName"), ""),
+            normalize_value(meeting.get("department"), ""),
+            normalize_value(meeting.get("sltdepartment"), ""),
+            join_list(meeting.get("stakeholders", []), ""),
+            join_list(meeting.get("companies", []), ""),
+            join_list(meeting.get("discussionPoints", []), ""),
+            join_list(meeting.get("keyDecisions", []), ""),
+            " ".join(action_texts),
+        ]
+    ).lower()
+
+
+def _format_meeting_answer(meeting: dict, question_lower: str) -> str:
+    title = normalize_value(meeting.get("title"), "this meeting")
+    summary = normalize_value(meeting.get("summary") or meeting.get("recaps"), "")
+    objective = normalize_value(meeting.get("objective"), "")
+    outcome = normalize_value(meeting.get("outcome"), "")
+    transcript = normalize_value(meeting.get("transcript"), "")
+    discussions = load_text_list(meeting.get("discussionPoints", []))
+    decisions = load_text_list(meeting.get("keyDecisions", []))
+    actions = meeting.get("actions", [])
+
+    wants_solution = any(
+        marker in question_lower
+        for marker in [
+            "solution",
+            "solve",
+            "how to",
+            "what should",
+            "what can",
+            "next step",
+            "next steps",
+            "fix",
+            "resolve",
+        ]
+    )
+
+    parts = [f'Meeting: "{title}"']
+    if summary:
+        parts.append(f"Recap: {summary}")
+    elif objective:
+        parts.append(f"Objective: {objective}")
+    elif discussions:
+        parts.append("Discussion points:")
+        parts.extend(f"- {item}" for item in discussions[:5])
+    else:
+        parts.append("No saved recap was found for this meeting.")
+
+    if outcome and outcome.lower() not in {"none", "not provided"}:
+        parts.append(f"Outcome: {outcome}")
+
+    if transcript and any(marker in question_lower for marker in ["detail", "details", "everything", "full recap", "complete", "all details"]):
+        parts.append(f"Transcript notes: {compact_transcript_for_prompt(transcript, max_chars=700)}")
+
+    if decisions:
+        parts.append("Key decisions:")
+        parts.extend(f"- {item}" for item in decisions[:5])
+
+    if actions:
+        parts.append("Action items:")
+        for action in actions:
+            action_text = normalize_value(action.get("text"), "Untitled action")
+            owner = normalize_value(action.get("owner"), "Not stated")
+            status = normalize_status(action)
+            deadline = normalize_value(action.get("deadline"), "None")
+            line = f"- {action_text} | owner: {owner} | status: {status} | deadline: {deadline}"
+            suggestion = normalize_value(action.get("suggestion"), "")
+            if not suggestion and action_text:
+                suggestion = f"Coordinate with {owner} to close this item."
+            if wants_solution and suggestion and suggestion.lower() not in {"none", "not stated"}:
+                line = f"{line} | solution: {suggestion}"
+            elif wants_solution:
+                line = f"{line} | solution: {suggestion}"
+            parts.append(line)
+    elif wants_solution:
+        parts.append("No action items were saved for this meeting, so there is no stored solution to suggest yet.")
+
+    return "\n".join(parts)
 
 
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
@@ -1207,28 +1333,43 @@ def chat_with_meetings(question: str, meetings: list) -> str:
             "actions",
             "meeting",
             "meetings",
+            "recap",
+            "recaps",
+            "summary",
+            "summarize",
+            "summarise",
+            "details",
+            "detail",
+            "past",
+            "previous",
+            "solution",
+            "solve",
+            "help",
         }
     }
 
+    follow_up_markers = (
+        "recap",
+        "recaps",
+        "summary",
+        "summarize",
+        "summarise",
+        "details",
+        "detail",
+        "this meeting",
+        "that meeting",
+        "the meeting",
+        "it",
+        "its",
+        "solution",
+        "solve",
+        "next step",
+        "next steps",
+    )
+    follow_up_question = any(marker in question_lower for marker in follow_up_markers)
+
     def meeting_search_blob(meeting: dict) -> str:
-        title = normalize_value(meeting.get("title"), "")
-        summary = normalize_value(meeting.get("summary"), "")
-        outcome = normalize_value(meeting.get("outcome"), "")
-        activity_id = normalize_value(meeting.get("meetingID"), "") or normalize_value(meeting.get("activityId"), "")
-        uppercase_tokens = re.findall(r"\b[A-Z]{2,}\b", f"{title} {summary} {outcome}")
-        return " ".join(
-            [
-                title,
-                summary,
-                outcome,
-                activity_id,
-                join_list(meeting.get("stakeholders", []), ""),
-                join_list(meeting.get("companies", []), ""),
-                join_list(meeting.get("discussionPoints", []), ""),
-                join_list(meeting.get("keyDecisions", []), ""),
-                " ".join(uppercase_tokens),
-            ]
-        ).lower()
+        return _meeting_context_text(meeting)
 
     scored_meetings = []
     for meeting in meetings:
@@ -1239,16 +1380,25 @@ def chat_with_meetings(question: str, meetings: list) -> str:
         stakeholders_blob = join_list(meeting.get("stakeholders", []), "").lower()
         if any(token in title or token in companies_blob or token in stakeholders_blob for token in question_tokens):
             score += 2
+        if _meeting_context_id(meeting) == last_meeting_id:
+            score += 4
         if score > 0:
             scored_meetings.append((score, meeting))
 
     relevant_meetings = [meeting for _, meeting in sorted(scored_meetings, key=lambda item: item[0], reverse=True)]
+    if follow_up_question and last_meeting_id:
+        context_meeting = next(
+            (meeting for meeting in meetings if _meeting_context_id(meeting) == last_meeting_id),
+            None,
+        )
+        if context_meeting:
+            relevant_meetings = [context_meeting] + [meeting for meeting in relevant_meetings if _meeting_context_id(meeting) != last_meeting_id]
     if not relevant_meetings and last_meeting_id:
         context_meeting = next(
             (
                 meeting
                 for meeting in meetings
-                if normalize_value(meeting.get("meetingID") or meeting.get("activityId") or meeting.get("id"), "") == last_meeting_id
+                if _meeting_context_id(meeting) == last_meeting_id
             ),
             None,
         )
@@ -1277,51 +1427,13 @@ def chat_with_meetings(question: str, meetings: list) -> str:
 
     if action_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
-        st.session_state.chat_context_meeting_id = normalize_value(
-            top_meeting.get("meetingID") or top_meeting.get("activityId") or top_meeting.get("id"),
-            "",
-        )
-        top_title = normalize_value(top_meeting.get("title"), "this meeting")
-        active_actions = top_meeting.get("actions", [])
-        if active_actions:
-            lines = [
-                f"For the meeting \"{top_title}\", the action items are:"
-            ]
-            for action in active_actions:
-                lines.append(
-                    f"- {normalize_value(action.get('text'))} | owner: {normalize_value(action.get('owner'), 'Not stated')} | "
-                    f"status: {normalize_status(action)} | deadline: {normalize_value(action.get('deadline'), 'None')}"
-                )
-            return "\n".join(lines)
-        return f'There is no action item mentioned in the meeting data for "{top_title}".'
+        st.session_state.chat_context_meeting_id = _meeting_context_id(top_meeting)
+        return _format_meeting_answer(top_meeting, question_lower)
 
     if about_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
-        st.session_state.chat_context_meeting_id = normalize_value(
-            top_meeting.get("meetingID") or top_meeting.get("activityId") or top_meeting.get("id"),
-            "",
-        )
-        top_title = normalize_value(top_meeting.get("title"), "this meeting")
-        summary = normalize_value(top_meeting.get("summary"), "")
-        objective = normalize_value(top_meeting.get("objective"), "")
-        discussions = load_text_list(top_meeting.get("discussionPoints", []))
-
-        parts = [f'The meeting "{top_title}" is about:']
-        if summary and summary != "None":
-            parts.append(summary)
-        elif objective and objective != "None":
-            parts.append(objective)
-        elif discussions:
-            parts.append("Main discussion points included:")
-            parts.extend(f"- {item}" for item in discussions[:3])
-        else:
-            parts.append("No clear summary was saved for this meeting yet.")
-
-        outcome = normalize_value(top_meeting.get("outcome"), "")
-        if outcome and outcome != "None" and outcome.lower() != "not provided":
-            parts.append(f"Outcome: {outcome}")
-
-        return "\n".join(parts)
+        st.session_state.chat_context_meeting_id = _meeting_context_id(top_meeting)
+        return _format_meeting_answer(top_meeting, question_lower)
 
     meeting_blocks = []
     for meeting in relevant_meetings[:5]:
@@ -1348,13 +1460,14 @@ def chat_with_meetings(question: str, meetings: list) -> str:
     system = """You are MeetIQ's AI assistant.
 
 You have two responsibilities:
-1. Answer questions using stored meeting data whenever the question is about meetings, tasks, follow-up items, decisions, owners, or history.
+1. Answer questions using stored meeting data whenever the question is about meetings, tasks, follow-up items, decisions, owners, history, recap details, or action-item solutions.
 2. If the user asks for general help, guidance, suggestions, templates, or advice that is not directly available in the meeting data, answer helpfully using your general knowledge.
 
 RULES:
 - If the user asks about pending, open, overdue, incomplete, unresolved, or outstanding actions, treat statuses Pending, In Progress, and Overdue as not completed.
 - Never say there are no pending items if meeting data contains Pending, In Progress, or Overdue actions.
 - When answering from meeting data, mention the relevant meeting title, owner, deadline, and status when available.
+- If the question sounds like a follow-up to the previous meeting, keep the answer anchored to the last meeting context unless the user clearly switches to a different meeting.
 - If the question is broader than the stored data, first answer from the data if relevant, then provide practical suggestions.
 - Be concise, practical, and business-friendly.
 """
@@ -1862,6 +1975,18 @@ st.markdown(
         border: 1px solid #ddd5e5;
         margin-top: 0.7rem;
     }
+    .upcoming-title {
+        font-weight: 800;
+        color: var(--brand);
+        font-size: 1rem;
+        line-height: 1.35;
+        margin-bottom: 0.15rem;
+    }
+    .upcoming-report-by {
+        color: var(--text-soft);
+        font-size: 0.86rem;
+        margin-bottom: 0.55rem;
+    }
     .upcoming-top {
         display: flex;
         justify-content: space-between;
@@ -2057,13 +2182,13 @@ if st.session_state.current_page == "Capture":
         with act_right:
             meeting_date = st.date_input("Meeting Date", value=date.today(), key="capture_meeting_date")
             dept_choice = st.multiselect("Department", dept_names, key="capture_department_choices")
+            organization_type = st.selectbox("Organization", ORGANIZATION_TYPE_OPTIONS, key="capture_organization_type")
             report_by = st.text_input("Report By", key="capture_updated_by", placeholder="Enter reporter name")
 
     role = ""
     main_activity = ""
     link_photo = ""
     link_photo_url = ""
-    organization_type = ""
     date_from = meeting_date
     date_to = meeting_date
     district = ""
@@ -2401,11 +2526,12 @@ if st.session_state.current_page == "Dashboard":
             else:
                 for meeting in upcoming_meetings:
                     report_by_value = normalize_value(meeting.get("updatedBy") or meeting.get("updated by"), "Not stated")
-                    expander_title = f"{normalize_value(meeting.get('title'), 'Untitled')} | Report by: {report_by_value}"
-                    with st.expander(expander_title):
+                    with st.expander(normalize_value(meeting.get("title"), "Untitled")):
                         st.markdown(
                             f"""
                             <div class="upcoming-item">
+                                <div class="upcoming-title">{normalize_value(meeting.get('title'), 'Untitled')}</div>
+                                <div class="upcoming-report-by">Report by: {report_by_value}</div>
                                 <div class="upcoming-top">
                                     <div>
                                         <div class="mini-copy">{normalize_value(meeting.get('meetingID'), 'No ID')} | {normalize_value(meeting.get('deptName') or meeting.get('department'), 'No group')}</div>
