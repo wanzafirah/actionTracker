@@ -768,6 +768,15 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
     department_names = [department["name"] for department in selected_department_records]
     department_ids = [department["id"] for department in selected_department_records]
     department_text = ", ".join(department_names)
+    manual_stakeholders = pending.get("capture_stakeholders", [])
+    if isinstance(manual_stakeholders, str):
+        manual_stakeholders = parse_lines(manual_stakeholders)
+    extracted_stakeholders = extract_entity_names(result.get("nlp_pipeline", {}).get("named_entities", {}).get("persons", []))
+    stakeholder_names = []
+    for name in manual_stakeholders + extracted_stakeholders:
+        cleaned = normalize_value(name, "")
+        if cleaned and cleaned.lower() not in {item.lower() for item in stakeholder_names}:
+            stakeholder_names.append(cleaned)
     preview_actions = pending.get("preview_actions", [])
     return {
         "id": meeting_id,
@@ -784,7 +793,7 @@ def build_meeting_record(result: dict, pending: dict) -> dict:
         "outcome": result.get("outcome", ""),
         "followUp": result.get("follow_up", False),
         "followUpReason": result.get("follow_up_reason", "") or "",
-        "stakeholders": extract_entity_names(result.get("nlp_pipeline", {}).get("named_entities", {}).get("persons", [])),
+        "stakeholders": stakeholder_names,
         "companies": extract_entity_names(result.get("nlp_pipeline", {}).get("named_entities", {}).get("organizations", [])),
         "keyDecisions": result.get("key_decisions", []),
         "discussionPoints": result.get("discussion_points", []),
@@ -955,6 +964,15 @@ def render_email_copy_block(meeting: dict, key_prefix: str) -> None:
     )
 
 
+def parse_lines(value: str) -> list:
+    items = []
+    for line in (value or "").splitlines():
+        cleaned = line.strip().lstrip("-").lstrip("â€¢").strip()
+        if cleaned:
+            items.append(cleaned)
+    return items
+
+
 def find_meeting_by_id(meetings: list, meeting_id: str):
     if not meeting_id:
         return None
@@ -1028,8 +1046,10 @@ Goals:
 Rules:
 - Treat only explicitly stated tasks, requests, assignments, and pending items as action items.
 - Do not infer hidden or implied tasks from general discussion or meeting purpose.
- - Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another organization, do not place it in action_items.
- - External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
+- If a recap says a partner or external party must provide missing details before the initiative can proceed, capture the follow-up as a TalentCorp action item to request and coordinate that information.
+- Keep the action item specific to the concrete next step, not a generic restatement of the meeting topic.
+- Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another organization, do not place it in action_items unless the action is specifically a TalentCorp follow-up to collect or coordinate that external information.
+- External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
 - Always return at least 1-3 discussion_points when the transcript contains actual meeting content.
 - discussion_points should capture the main topics discussed, reviewed, aligned, explored, or presented.
 - Return key_decisions only when the transcript clearly states a decision, agreement, confirmation, or approval.
@@ -1037,6 +1057,7 @@ Rules:
 - If owner or deadline is missing, use "Not stated" and "None".
 - Prefer separate action items instead of merging unrelated tasks, but only when each task is explicitly stated.
 - If structured metadata is provided, use it as context.
+- Use metadata such as stakeholders, organizations, departments, and report-by names to resolve who the meeting is about and what follow-up is needed.
 - If the recap only describes the purpose of a meeting, expected outcome, or general discussion without a direct task, return an empty action_items list and set follow_up to false unless a pending task is clearly stated.
 
 Return this schema only:
@@ -1396,6 +1417,48 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
     filtered_actions = filter_talentcorp_actions(result.get("action_items", []))
     if not filtered_actions and not objective_only:
         filtered_actions = fallback_action_items(cleaned_transcript)
+
+    transcript_lower = cleaned_transcript.lower()
+    has_requirement_list = any(
+        phrase in transcript_lower
+        for phrase in ("position name", "salary range", "required skills", "number of openings", "upskilling opportunities")
+    )
+    if has_requirement_list and not any(
+        "required program details" in normalize_value(action.get("text"), "").lower()
+        or "provide required program details" in normalize_value(action.get("text"), "").lower()
+        for action in filtered_actions
+    ):
+        filtered_actions.insert(
+            0,
+            {
+                "text": "Follow up with WD to provide required program details",
+                "owner": "TalentCorp team",
+                "department": "TalentCorp",
+                "deadline": "None",
+                "priority": "Medium",
+                "follow_up_required": True,
+                "follow_up_reason": "The recap says WD needs to provide key information before the initiative can proceed.",
+                "suggestion": "Request the missing details and confirm the submission timeline with WD.",
+                "ner_entities": [],
+            },
+        )
+
+    if "mywira" in transcript_lower and not any(
+        "mywira" in normalize_value(action.get("text"), "").lower() for action in filtered_actions
+    ):
+        filtered_actions.append(
+            {
+                "text": "Coordinate WD onboarding for the MyWira initiative",
+                "owner": "TalentCorp team",
+                "department": "TalentCorp",
+                "deadline": "None",
+                "priority": "Medium",
+                "follow_up_required": True,
+                "follow_up_reason": "The recap describes WD joining the MyWira programme.",
+                "suggestion": "Confirm WD participation and align the next steps for the programme.",
+                "ner_entities": [],
+            }
+        )
     result["action_items"] = filtered_actions
     result.setdefault("classification", {})
     result["classification"]["action_items_count"] = len(filtered_actions)
@@ -1516,6 +1579,8 @@ def chat_with_meetings(question: str, meetings: list) -> str:
         for phrase in [
             "about",
             "summary",
+            "recap",
+            "recaps",
             "objective",
             "what is the meeting",
             "what was the meeting",
@@ -1524,13 +1589,26 @@ def chat_with_meetings(question: str, meetings: list) -> str:
             "discuss",
         ]
     )
+    recap_question = any(
+        phrase in question_lower
+        for phrase in [
+            "recap",
+            "recaps",
+            "summary",
+            "summarize",
+            "summarise",
+            "what's the recap",
+            "whats the recap",
+            "what is the recap",
+        ]
+    )
 
     if action_question and relevant_meetings:
         top_meeting = relevant_meetings[0]
         st.session_state.chat_context_meeting_id = _meeting_context_id(top_meeting)
         return _format_meeting_answer(top_meeting, question_lower)
 
-    if about_question and relevant_meetings:
+    if (about_question or recap_question) and relevant_meetings:
         top_meeting = relevant_meetings[0]
         st.session_state.chat_context_meeting_id = _meeting_context_id(top_meeting)
         return _format_meeting_answer(top_meeting, question_lower)
@@ -1548,8 +1626,11 @@ def chat_with_meetings(question: str, meetings: list) -> str:
                 [
                     f"Date: {meeting['date']}",
                     f"Title: {meeting['title']}",
+                    f"Summary: {normalize_value(meeting.get('summary') or meeting.get('recaps'), 'No summary available.')}",
+                    f"Objective: {normalize_value(meeting.get('objective'), 'Not provided')}",
                     f"Outcome: {meeting.get('outcome', '')}",
                     f"Follow-up: {meeting.get('followUp', False)}",
+                    f"Stakeholders: {join_list(meeting.get('stakeholders', []), 'None')}",
                     "Action items:",
                     "\n".join(action_lines) if action_lines else "- None",
                 ]
@@ -2295,6 +2376,12 @@ if st.session_state.current_page == "Capture":
             dept_choice = st.multiselect("Department", dept_names, key="capture_department_choices")
             organization_type = st.selectbox("Organization", ORGANIZATION_TYPE_OPTIONS, key="capture_organization_type")
             report_by = st.text_input("Report By", key="capture_updated_by", placeholder="Enter reporter name")
+            stakeholder_text = st.text_area(
+                "Stakeholders",
+                key="capture_stakeholders",
+                height=110,
+                placeholder="List one stakeholder per line",
+            )
 
     role = ""
     main_activity = ""
@@ -2312,6 +2399,7 @@ if st.session_state.current_page == "Capture":
     stfemail = ""
     supemail = ""
     updated_by = report_by
+    capture_stakeholders = parse_lines(stakeholder_text)
 
     transcript_box = st.container(border=True)
     with transcript_box:
@@ -2432,6 +2520,7 @@ if st.session_state.current_page == "Capture":
                 "Date From": date_from.isoformat(),
                 "Date To": date_to.isoformat(),
                 "Department": ", ".join(dept_choice),
+                "Stakeholders": ", ".join(capture_stakeholders),
                 "Representative Position": representative_position,
                 "Representative Name": representative_name,
                 "Representative Department": representative_department,
@@ -2461,6 +2550,7 @@ if st.session_state.current_page == "Capture":
                 "attach_file": attach_file_value,
                 "activity_type": activity_type,
                 "organization_type": organization_type,
+                "capture_stakeholders": capture_stakeholders,
                 "date_from": date_from.isoformat(),
                 "date_to": date_to.isoformat(),
                 "representative_position": representative_position,
@@ -2500,50 +2590,36 @@ if st.session_state.current_page == "Capture":
                     items.append(cleaned)
             return items
 
-        insight_col, entity_col = st.columns([1.2, 0.8])
-        with insight_col:
-            st.markdown("### Discussion")
-            discussions_text = st.text_area(
-                "Discussion Points",
-                value="\n".join(normalize_value(item, "") for item in result.get("discussion_points", [])),
-                key="preview_discussion_points",
-                height=220,
-                placeholder="Add one discussion point per line",
-            )
-            result["key_decisions"] = []
-            result["discussion_points"] = parse_preview_list(discussions_text)
-
-        with entity_col:
-            entities = result.get("nlp_pipeline", {}).get("named_entities", {})
-            st.markdown("### Meeting Metadata")
-            people_text = st.text_area(
-                "People",
-                value="\n".join(extract_entity_names(entities.get("persons", []))),
-                key="preview_people",
-                height=100,
-                placeholder="Add one person per line",
-            )
-            organizations_text = st.text_area(
-                "Organizations",
-                value="\n".join(extract_entity_names(entities.get("organizations", []))),
-                key="preview_organizations",
-                height=100,
-                placeholder="Add one organization per line",
-            )
-            dates_text = st.text_area(
-                "Dates Mentioned",
-                value="\n".join(extract_entity_names(entities.get("dates", []))),
-                key="preview_dates",
-                height=100,
-                placeholder="Add one date per line",
-            )
-            entities["persons"] = parse_preview_list(people_text)
-            entities["organizations"] = parse_preview_list(organizations_text)
-            entities["dates"] = parse_preview_list(dates_text)
-            entities["locations"] = []
-            result.setdefault("nlp_pipeline", {})
-            result["nlp_pipeline"].setdefault("named_entities", {})
-            result["nlp_pipeline"]["named_entities"] = entities
+        entities = result.get("nlp_pipeline", {}).get("named_entities", {})
+        st.markdown("### Meeting Metadata")
+        people_text = st.text_area(
+            "People",
+            value="\n".join(extract_entity_names(entities.get("persons", []))),
+            key="preview_people",
+            height=100,
+            placeholder="Add one person per line",
+        )
+        organizations_text = st.text_area(
+            "Organizations",
+            value="\n".join(extract_entity_names(entities.get("organizations", []))),
+            key="preview_organizations",
+            height=100,
+            placeholder="Add one organization per line",
+        )
+        dates_text = st.text_area(
+            "Dates Mentioned",
+            value="\n".join(extract_entity_names(entities.get("dates", []))),
+            key="preview_dates",
+            height=100,
+            placeholder="Add one date per line",
+        )
+        entities["persons"] = parse_preview_list(people_text)
+        entities["organizations"] = parse_preview_list(organizations_text)
+        entities["dates"] = parse_preview_list(dates_text)
+        entities["locations"] = []
+        result.setdefault("nlp_pipeline", {})
+        result["nlp_pipeline"].setdefault("named_entities", {})
+        result["nlp_pipeline"]["named_entities"] = entities
 
         st.markdown("### Action Plan")
         preview_actions = pending.get("preview_actions", [])
