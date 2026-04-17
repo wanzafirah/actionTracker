@@ -1132,7 +1132,9 @@ PIPELINE_SYSTEM = """You are a meeting intelligence system. Return ONLY valid JS
 Goals:
 - Extract persons, organizations, dates, and locations.
 - Identify the meeting objective from the transcript and metadata.
-- Write a concise but complete 4-5 sentence summary.
+- Write a detailed but readable 6-8 sentence summary that stays faithful to the transcript.
+- Preserve the original meeting context, key participants, decisions, concerns, commitments, and next steps.
+- Avoid generic filler such as "hello everyone" unless it is truly relevant to the meeting.
 - Extract key decisions, discussion points, and action items.
 - Mark follow-up as true only when something is still pending.
 
@@ -1151,6 +1153,8 @@ Rules:
 - Prefer separate action items instead of merging unrelated tasks, but only when each task is explicitly stated.
 - If structured metadata is provided, use it as context.
 - Use metadata such as stakeholders, organizations, departments, and report-by names to resolve who the meeting is about and what follow-up is needed.
+- If the transcript is a long discussion, summarize the full conversation into the main topics, what was agreed, what was requested, and what remains pending.
+- Keep the summary concrete and specific. Mention the actual organizations, speakers, projects, timelines, and requests when they are present.
 - If the recap only describes the purpose of a meeting, expected outcome, or general discussion without a direct task, return an empty action_items list and set follow_up to false unless a pending task is clearly stated.
 
 Return this schema only:
@@ -1272,6 +1276,9 @@ def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) ->
         "title": title,
         "meeting_type": meeting_type,
         "category": category,
+        "key_points_discussed": discussion_points,
+        "next_steps": [],
+        "people_involved": [],
         "nlp_pipeline": {
             "token_count": 0,
             "sentence_count": len(transcript_sentences(transcript)),
@@ -1322,6 +1329,16 @@ def normalize_pipeline_result(result: dict, transcript: str, metadata: dict | No
     for key in ("key_decisions", "discussion_points", "action_items"):
         if not isinstance(merged.get(key), list):
             merged[key] = safe[key]
+    if not isinstance(merged.get("key_points_discussed"), list):
+        merged["key_points_discussed"] = merged.get("discussion_points", [])
+    if not isinstance(merged.get("next_steps"), list):
+        merged["next_steps"] = [
+            normalize_value(action.get("text"), "")
+            for action in merged.get("action_items", [])
+            if isinstance(action, dict) and normalize_value(action.get("text"), "")
+        ]
+    if not isinstance(merged.get("people_involved"), list):
+        merged["people_involved"] = []
     if isinstance(merged.get("action_items"), list):
         normalized_actions = []
         for action in merged["action_items"]:
@@ -1457,7 +1474,7 @@ def _format_meeting_answer(meeting: dict, question_lower: str) -> str:
 
 
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
-    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=800)
+    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=3000)
     objective_only = is_objective_only_transcript(cleaned_transcript)
     metadata_lines = []
     for label, value in (metadata or {}).items():
@@ -1471,8 +1488,12 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         else ""
     )
     user_msg = (
-        "Return concise JSON with objective, summary, follow-up, and action items.\n"
+        "Return detailed JSON with objective, summary, follow-up, and action items.\n"
         "Use only explicit tasks from the text. Do not invent implied action items.\n"
+        "For the summary, write a faithful meeting brief with enough detail for someone who missed the meeting.\n"
+        "Do not collapse everything into a single vague sentence.\n"
+        "Also include these optional arrays for display: key_points_discussed, next_steps, people_involved.\n"
+        "Use key_points_discussed for the main discussion topics, next_steps for the concrete follow-up items, and people_involved for the key participants.\n"
         f"{objective_note}"
         f"Activity metadata:\n{metadata_block or 'None provided'}\n\n"
         f"Meeting content:\n{cleaned_transcript}"
@@ -1950,6 +1971,27 @@ st.markdown(
         gap: 0.9rem;
         margin-top: 1.1rem;
         color: var(--text-muted);
+    }
+    .summary-section {
+        margin-top: 0.85rem;
+        padding: 1rem 1.05rem;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, #ffffff 0%, #fbfbfe 100%);
+        box-shadow: 0 10px 24px rgba(14, 27, 72, 0.06);
+    }
+    .summary-section-title {
+        font-size: 0.92rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--brand-2);
+        margin-bottom: 0.55rem;
+    }
+    .summary-section-body {
+        color: var(--text);
+        line-height: 1.6;
+        font-size: 0.98rem;
     }
     .kpi-card {
         padding: 1rem 1.05rem;
