@@ -1,7 +1,7 @@
 import os
 
 
-OLLAMA_MODEL = "llama3.2"
+OLLAMA_MODEL = "llama3.2:latest"
 WHISPER_MODEL = "tiny"
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetiq_data.xlsx")
 MEETINGS_SHEET_NAME = "meetings"
