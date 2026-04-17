@@ -23,7 +23,6 @@ def meeting_id_prefix(category: str) -> str:
         "external meeting": "EX",
         "internal meeting": "IN",
         "workshop": "WS",
-        "event": "EV",
     }
     if category_text in mapping:
         return mapping[category_text]
