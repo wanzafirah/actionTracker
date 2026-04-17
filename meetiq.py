@@ -167,6 +167,7 @@ def parse_loaded_dataframes(meetings_df: pd.DataFrame, departments_df: pd.DataFr
             meetings.append(
                 {
                     "id": first_nonempty(row, "id", fallback=""),
+                    "user_id": first_nonempty(row, "user_id", fallback=""),
                     "title": first_nonempty(row, "title", "activityTitle", fallback=""),
                     "date": first_nonempty(row, "meeting date", "date", "meetingDate", fallback=""),
                     "type": first_nonempty(row, "meeting type", "type", "activityType", fallback=""),
@@ -265,6 +266,7 @@ def build_meeting_rows(meetings: list) -> list:
         meetings_rows.append(
             {
                 "id": meeting.get("id", ""),
+                "user_id": meeting.get("user_id", ""),
                 "title": meeting.get("title", ""),
                 "date": meeting.get("date", ""),
                 "meeting date": meeting.get("date", ""),
