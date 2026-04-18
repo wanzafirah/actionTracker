@@ -631,7 +631,7 @@ def build_meeting_record(raw_text: str, recap: dict, user_id: str, source_name: 
 
 
 def summarize_meeting_text(raw_text: str, source_name: str = "Telegram message") -> dict:
-    prompt_text = compact_transcript_for_prompt(raw_text, max_chars=2400)
+    prompt_text = compact_transcript_for_prompt(raw_text, max_chars=3000)
     objective_only = is_objective_only_transcript(prompt_text)
     has_explicit_actions = bool(extract_explicit_action_items_from_text(raw_text)) or has_action_signals(raw_text)
     system = """You are MeetIQ.
@@ -655,7 +655,10 @@ Required JSON keys:
 
 Rules:
 - If the text is a meeting recap or minutes, always extract a useful summary even if the text is long.
-- The summary should be 2 to 4 short sentences and capture the main context, decision, and next step.
+- The summary should be 6 to 8 sentences when the discussion is long, and it should capture the main context, decision, concern, request, and next step.
+- The objective should be a concise paraphrase of the meeting purpose, not a copy of the opening recap line.
+- The summary should synthesize the full discussion in your own words; do not restate the first transcript sentence verbatim.
+- Preserve the original meeting context and key participants. Avoid generic filler such as "hello everyone" unless it is truly relevant.
 - The objective should reflect what the meeting was trying to achieve.
 - The outcome should say what was decided, agreed, or what remains pending.
 - Only create action items when they are explicitly written in the text or clearly stated as a task/request.
@@ -663,6 +666,7 @@ Rules:
 - Only list people in stakeholders; do not put organizations or companies in stakeholders.
 - Only list companies or organizations in companies.
 - If the meeting has no clear task or request, return an empty action_items list.
+- If the transcript is discussion-heavy, summarize the whole conversation instead of only the opening lines.
 """
     if objective_only:
         system += "\n- The source text may be objective-style meeting notes; infer the recap from the context and do not leave fields blank."
