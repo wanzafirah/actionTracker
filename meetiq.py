@@ -1137,6 +1137,9 @@ Goals:
 - Avoid generic filler such as "hello everyone" unless it is truly relevant to the meeting.
 - Extract key decisions, discussion points, and action items.
 - Mark follow-up as true only when something is still pending.
+- The objective should be a concise paraphrase of the meeting purpose, not a copy of the opening recap line.
+- The summary should synthesize the whole discussion in your own words; do not restate the first transcript sentence verbatim.
+- For long discussions, include the main context, key points, decisions, requests, and pending items instead of repeating the meeting intro.
 
 Rules:
 - Treat only explicitly stated tasks, requests, assignments, and pending items as action items.
@@ -1490,7 +1493,8 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
     user_msg = (
         "Return detailed JSON with objective, summary, follow-up, and action items.\n"
         "Use only explicit tasks from the text. Do not invent implied action items.\n"
-        "For the summary, write a faithful meeting brief with enough detail for someone who missed the meeting.\n"
+        "For the summary, synthesize the full discussion in your own words and do not copy the opening recap line.\n"
+        "Write enough detail for someone who missed the meeting to understand the context, key points, decisions, requests, and pending items.\n"
         "Do not collapse everything into a single vague sentence.\n"
         "Also include these optional arrays for display: key_points_discussed, next_steps, people_involved.\n"
         "Use key_points_discussed for the main discussion topics, next_steps for the concrete follow-up items, and people_involved for the key participants.\n"
@@ -1499,7 +1503,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         f"Meeting content:\n{cleaned_transcript}"
     )
     try:
-        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
+        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=900)
         try:
             result = extract_json(raw)
         except Exception:
