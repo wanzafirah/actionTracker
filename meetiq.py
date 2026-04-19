@@ -1133,14 +1133,21 @@ PIPELINE_SYSTEM = """You are a meeting intelligence system. Return ONLY valid JS
 Goals:
 - Extract persons, organizations, dates, and locations.
 - Identify the meeting objective from the transcript and metadata.
-- Write a concise but complete 4-5 sentence summary.
+- Write a detailed but readable 6-8 sentence summary that stays faithful to the transcript.
+- Preserve the original meeting context, key participants, decisions, concerns, commitments, and next steps.
+- Avoid generic filler such as "hello everyone" unless it is truly relevant to the meeting.
 - Extract key decisions, discussion points, and action items.
 - Mark follow-up as true only when something is still pending.
+- The objective should be a concise paraphrase of the meeting purpose, not a copy of the opening recap line.
+- The summary should synthesize the whole discussion in your own words; do not restate the first transcript sentence verbatim.
+- For long discussions, include the main context, key points, decisions, requests, and pending items instead of repeating the meeting intro.
 
 Rules:
 - Treat only explicitly stated tasks, requests, assignments, and pending items as action items.
 - Do not infer hidden or implied tasks from general discussion or meeting purpose.
-- Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another company, do not place it in action_items.
+- If a recap says a partner or external party must provide missing details before the initiative can proceed, capture the follow-up as a TalentCorp action item to request and coordinate that information.
+- Keep the action item specific to the concrete next step, not a generic restatement of the meeting topic.
+- Only keep action items that belong to TalentCorp or TalentCorp internal teams. If the assignee or responsibility is clearly for another organization, do not place it in action_items unless the action is specifically a TalentCorp follow-up to collect or coordinate that external information.
 - External-party responsibilities can still appear in the summary or discussion points, but not as TalentCorp action items.
 - Always return at least 1-3 discussion_points when the transcript contains actual meeting content.
 - discussion_points should capture the main topics discussed, reviewed, aligned, explored, or presented.
@@ -1149,6 +1156,9 @@ Rules:
 - If owner or deadline is missing, use "Not stated" and "None".
 - Prefer separate action items instead of merging unrelated tasks, but only when each task is explicitly stated.
 - If structured metadata is provided, use it as context.
+- Use metadata such as stakeholders, organizations, departments, and report-by names to resolve who the meeting is about and what follow-up is needed.
+- If the transcript is a long discussion, summarize the full conversation into the main topics, what was agreed, what was requested, and what remains pending.
+- Keep the summary concrete and specific. Mention the actual organizations, speakers, projects, timelines, and requests when they are present.
 - If the recap only describes the purpose of a meeting, expected outcome, or general discussion without a direct task, return an empty action_items list and set follow_up to false unless a pending task is clearly stated.
 
 Return this schema only:
