@@ -24,6 +24,7 @@ from meetiq_utils import (
     is_objective_only_transcript,
     better_objective_from_transcript,
     looks_like_copied_intro,
+    summary_needs_expansion,
     smart_summary_from_transcript,
     today_str,
     uid,
@@ -239,7 +240,7 @@ def normalize_title_key(value: str) -> str:
 
 
 def fallback_summary_from_text(raw_text: str, limit: int = 420) -> str:
-    summary = smart_summary_from_transcript(raw_text, limit=3)
+    summary = smart_summary_from_transcript(raw_text, limit=5)
     if not summary:
         return "Meeting recap submitted via Telegram."
     if len(summary) > limit:
@@ -676,14 +677,14 @@ Rules:
         system += "\n- This submission may be discussion-heavy; prefer a clean summary and leave action_items empty unless the text clearly lists tasks."
 
     user_msg = f"Source name: {source_name}\nDate: {today_str()}\n\nText:\n{prompt_text}"
-    raw = call_ollama(system, user_msg, max_tokens=1200)
+    raw = call_ollama(system, user_msg, max_tokens=1600)
     parsed = extract_json_blob(raw)
     if not parsed:
         parsed = repair_json_with_ollama(raw)
 
     parsed["title"] = normalize_value(parsed.get("title"), "") or fallback_title_from_text(raw_text)
     parsed["summary"] = normalize_value(parsed.get("summary"), "") or fallback_summary_from_text(raw_text)
-    if looks_like_copied_intro(parsed["summary"], raw_text):
+    if summary_needs_expansion(parsed["summary"], raw_text):
         parsed["summary"] = fallback_summary_from_text(raw_text)
 
     parsed["objective"] = normalize_value(parsed.get("objective"), "") or "Review the meeting discussion and align on the next steps."
