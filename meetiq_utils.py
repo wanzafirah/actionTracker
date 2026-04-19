@@ -467,12 +467,42 @@ def better_objective_from_transcript(text: str) -> str:
     return cleaned
 
 
+def extract_deadline_phrase(text: str) -> str:
+    lowered = normalize_value(text, "").lower()
+    patterns = [
+        r"\bby\s+([A-Z][a-z]+\s+\d{1,2},?\s+\d{4})",
+        r"\bby\s+([A-Z][a-z]+\s+\d{4})",
+        r"\bby\s+(early\s+[A-Z][a-z]+)",
+        r"\bby\s+(mid\s+[A-Z][a-z]+)",
+        r"\bby\s+(late\s+[A-Z][a-z]+)",
+        r"\b(in\s+early\s+[A-Z][a-z]+)",
+        r"\b(in\s+mid\s+[A-Z][a-z]+)",
+        r"\b(in\s+late\s+[A-Z][a-z]+)",
+        r"\b(in\s+[A-Z][a-z]+)",
+        r"\b(before\s+the\s+programme\s+begins)",
+        r"\b(before\s+the\s+program(?:me)?\s+begins)",
+        r"\b(before\s+the\s+session)",
+        r"\b(before\s+the\s+workshop)",
+        r"\b(before\s+the\s+event)",
+    ]
+    source = normalize_value(text, "")
+    for pattern in patterns:
+        match = re.search(pattern, source, flags=re.IGNORECASE)
+        if match:
+            return normalize_value(match.group(1), "None")
+    if "early october" in lowered:
+        return "Early October"
+    if "before the programme begins" in lowered or "before the program begins" in lowered:
+        return "Before the programme begins"
+    return "None"
+
+
 def fallback_action_items(text: str, limit: int = 5) -> list:
     actions = []
     seen = set()
     text_lower = (text or "").lower()
 
-    def add_action(action_text: str, owner: str, department: str, suggestion: str, reason: str):
+    def add_action(action_text: str, owner: str, department: str, suggestion: str, reason: str, deadline: str = "None"):
         if action_text.lower() in seen or len(actions) >= limit:
             return
         actions.append(
@@ -480,7 +510,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                 "text": action_text,
                 "owner": owner,
                 "department": department,
-                "deadline": "None",
+                "deadline": deadline,
                 "priority": "Medium",
                 "follow_up_required": True,
                 "follow_up_reason": reason,
@@ -492,6 +522,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
 
     for sentence in transcript_sentences(text):
         lowered = sentence.lower()
+        deadline_text = extract_deadline_phrase(sentence)
         if "requested support for" in lowered:
             detail = sentence.split("requested support for", 1)[1].strip(" .")
             if detail:
@@ -501,6 +532,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                     "TalentCorp",
                     f"Clarify the required support and confirm the next steps for {detail}.",
                     "Support was explicitly requested during the meeting.",
+                    deadline=deadline_text,
                 )
         if "requested" in lowered and "briefing session" in lowered:
             add_action(
@@ -509,6 +541,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                 "TalentCorp",
                 "Confirm the briefing scope, timing, and participants before the session.",
                 "Briefing support was explicitly requested.",
+                deadline=deadline_text,
             )
         if "agreed to continue refining" in lowered:
             detail = sentence.split("agreed to continue refining", 1)[1].strip(" .")
@@ -518,6 +551,7 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                 "TalentCorp",
                 "Prepare an updated framework before the next discussion.",
                 "The meeting ended with agreement to continue refinement.",
+                deadline=deadline_text,
             )
         if "requested" in lowered and "onboarding" in lowered:
             add_action(
@@ -526,6 +560,46 @@ def fallback_action_items(text: str, limit: int = 5) -> list:
                 "TalentCorp",
                 "Define the onboarding process and coordination plan.",
                 "Onboarding support was explicitly requested.",
+                deadline=deadline_text,
+            )
+        if "talentcorp agreed to support" in lowered or "talentcorp will support" in lowered:
+            detail = sentence
+            detail = re.sub(r"^.*?(?:agreed to support|will support)\s+", "", detail, flags=re.IGNORECASE).strip(" .")
+            add_action(
+                f"Support {detail}" if detail else "Support the planned session",
+                "TalentCorp team",
+                "TalentCorp",
+                "Coordinate the required speakers, materials, and session support.",
+                "TalentCorp support was explicitly confirmed during the meeting.",
+                deadline=deadline_text,
+            )
+        if "providing speakers" in lowered or "relevant materials" in lowered:
+            add_action(
+                "Provide speakers and relevant materials for the session",
+                "TalentCorp team",
+                "TalentCorp",
+                "Confirm the speaker lineup and prepare the supporting materials before the session.",
+                "TalentCorp committed to support the session with speakers and materials.",
+                deadline=deadline_text,
+            )
+        if "will circulate" in lowered and any(token in lowered for token in ("participant list", "logistical details", "logistics")):
+            add_action(
+                "Follow up with the university team on the updated participant list and logistical details",
+                "TalentCorp team",
+                "TalentCorp",
+                "Track the updated participant list and logistics details before the programme starts.",
+                "The university team committed to circulate updated participant and logistics information.",
+                deadline=deadline_text,
+            )
+        if "will provide" in lowered and "talentcorp" in lowered:
+            detail = re.sub(r"^.*?will provide\s+", "", sentence, flags=re.IGNORECASE).strip(" .")
+            add_action(
+                f"Provide {detail}" if detail else "Provide the requested deliverables",
+                "TalentCorp team",
+                "TalentCorp",
+                "Confirm the deliverables and prepare them for the next step.",
+                "TalentCorp committed to provide a deliverable during the meeting.",
+                deadline=deadline_text,
             )
     if any(phrase in text_lower for phrase in ("position name", "salary range", "required skills", "number of openings", "upskilling opportunities")):
         add_action(
