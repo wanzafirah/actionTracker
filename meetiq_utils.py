@@ -378,6 +378,84 @@ def smart_summary_from_transcript(text: str, limit: int = 3) -> str:
     return compact[:420].rsplit(" ", 1)[0].rstrip(".,;:") + "..." if len(compact) > 420 else compact
 
 
+def normalize_compare_text(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", text or "").lower()).strip()
+
+
+def first_meaningful_sentence(text: str) -> str:
+    for sentence in transcript_sentences(text):
+        if len(sentence.split()) >= 6:
+            return sentence
+    sentences = transcript_sentences(text)
+    return sentences[0] if sentences else ""
+
+
+def looks_like_copied_intro(candidate: str, transcript: str) -> bool:
+    candidate_norm = normalize_compare_text(candidate)
+    if not candidate_norm:
+        return True
+    if len(candidate_norm.split()) < 8:
+        return True
+
+    intro = normalize_compare_text(first_meaningful_sentence(transcript))
+    if not intro:
+        return False
+
+    if candidate_norm == intro or candidate_norm in intro or intro in candidate_norm:
+        return True
+
+    candidate_words = candidate_norm.split()
+    intro_words = intro.split()
+    overlap = len(set(candidate_words) & set(intro_words))
+    if intro_words and overlap / max(len(set(intro_words)), 1) >= 0.8 and len(candidate_words) <= len(intro_words) + 4:
+        return True
+
+    return False
+
+
+def better_objective_from_transcript(text: str) -> str:
+    sentences = transcript_sentences(text)
+    if not sentences:
+        return ""
+
+    keywords = (
+        "objective",
+        "purpose",
+        "discuss",
+        "review",
+        "align",
+        "brainstorm",
+        "plan",
+        "explore",
+        "propose",
+        "request",
+        "next step",
+        "follow up",
+        "collaboration",
+    )
+    scored: list[tuple[int, int, str]] = []
+    for index, sentence in enumerate(sentences):
+        lowered = sentence.lower()
+        score = sum(1 for keyword in keywords if keyword in lowered)
+        if len(sentence.split()) >= 8:
+            score += 1
+        if index == 0:
+            score -= 1
+        scored.append((score, index, sentence))
+
+    chosen = max(scored, key=lambda item: (item[0], -item[1]))[2]
+    cleaned = re.sub(
+        r"^(today|this morning|this afternoon|yesterday|the team|the meeting|our team|we)\b[,:-]?\s*",
+        "",
+        chosen,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned.split()) > 34:
+        cleaned = " ".join(cleaned.split()[:34]).rstrip(".,;:") + "..."
+    return cleaned
+
+
 def fallback_action_items(text: str, limit: int = 5) -> list:
     actions = []
     seen = set()
