@@ -1275,14 +1275,12 @@ def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) ->
     meeting_type = normalize_value(metadata.get("Activity Type"), "") or "Not Provided"
     category = normalize_value(metadata.get("Category"), "") or "Not Provided"
     objective = discussion_points[0] if discussion_points else "Objective not clearly extracted."
-    summary = smart_summary_from_transcript(transcript, limit=5) or "Summary could not be generated from the transcript."
+    summary_sentences = transcript_sentences(transcript)[:3]
+    summary = " ".join(summary_sentences).strip() or "Summary could not be generated from the transcript."
     return {
         "title": title,
         "meeting_type": meeting_type,
         "category": category,
-        "key_points_discussed": discussion_points,
-        "next_steps": [],
-        "people_involved": [],
         "nlp_pipeline": {
             "token_count": 0,
             "sentence_count": len(transcript_sentences(transcript)),
@@ -1333,37 +1331,6 @@ def normalize_pipeline_result(result: dict, transcript: str, metadata: dict | No
     for key in ("key_decisions", "discussion_points", "action_items"):
         if not isinstance(merged.get(key), list):
             merged[key] = safe[key]
-    if not isinstance(merged.get("key_points_discussed"), list):
-        merged["key_points_discussed"] = merged.get("discussion_points", [])
-    if not isinstance(merged.get("next_steps"), list):
-        merged["next_steps"] = [
-            normalize_value(action.get("text"), "")
-            for action in merged.get("action_items", [])
-            if isinstance(action, dict) and normalize_value(action.get("text"), "")
-        ]
-    if not isinstance(merged.get("people_involved"), list):
-        merged["people_involved"] = []
-    summary_text = normalize_value(merged.get("summary"), "")
-    if summary_needs_expansion(summary_text, transcript):
-        merged["summary"] = smart_summary_from_transcript(transcript, limit=5) or summary_text
-    objective_text = normalize_value(merged.get("objective"), "")
-    if not objective_text or looks_like_copied_intro(objective_text, transcript):
-        merged["objective"] = better_objective_from_transcript(transcript) or merged["objective"]
-    if isinstance(merged.get("action_items"), list):
-        normalized_actions = []
-        for action in merged["action_items"]:
-            if isinstance(action, dict):
-                normalized_action = dict(action)
-                department_value = normalize_value(
-                    normalized_action.get("department") or normalized_action.get("company"),
-                    "Not stated",
-                )
-                normalized_action["department"] = department_value
-                normalized_action["company"] = department_value
-                normalized_actions.append(normalized_action)
-            else:
-                normalized_actions.append(action)
-        merged["action_items"] = normalized_actions
     for key in ("title", "meeting_type", "category", "objective", "summary", "outcome", "budget_notes"):
         merged[key] = normalize_value(merged.get(key), safe[key])
     merged["estimated_budget"] = merged.get("estimated_budget", 0) or 0
@@ -1484,7 +1451,7 @@ def _format_meeting_answer(meeting: dict, question_lower: str) -> str:
 
 
 def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
-    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=3000)
+    cleaned_transcript = compact_transcript_for_prompt(transcript.strip(), max_chars=800)
     objective_only = is_objective_only_transcript(cleaned_transcript)
     metadata_lines = []
     for label, value in (metadata or {}).items():
@@ -1498,28 +1465,22 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         else ""
     )
     user_msg = (
-        "Return detailed JSON with objective, summary, follow-up, and action items.\n"
+        "Return concise JSON with objective, summary, follow-up, and action items.\n"
         "Use only explicit tasks from the text. Do not invent implied action items.\n"
-        "For the summary, synthesize the full discussion in your own words and do not copy the opening recap line.\n"
-        "Write enough detail for someone who missed the meeting to understand the context, key points, decisions, requests, and pending items.\n"
-        "Do not collapse everything into a single vague sentence.\n"
-        "Also include these optional arrays for display: key_points_discussed, next_steps, people_involved.\n"
-        "Use key_points_discussed for the main discussion topics, next_steps for the concrete follow-up items, and people_involved for the key participants.\n"
         f"{objective_note}"
         f"Activity metadata:\n{metadata_block or 'None provided'}\n\n"
         f"Meeting content:\n{cleaned_transcript}"
     )
+    raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
     try:
-        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=1400)
-        try:
-            result = extract_json(raw)
-        except Exception:
-            try:
-                result = recover_json_with_ollama(raw)
-            except Exception:
-                result = build_safe_pipeline_result(cleaned_transcript, metadata)
+        result = extract_json(raw)
+    except json.JSONDecodeError:
+        result = recover_json_with_ollama(raw)
     except Exception:
-        result = build_safe_pipeline_result(cleaned_transcript, metadata)
+        try:
+            result = recover_json_with_ollama(raw)
+        except Exception:
+            result = build_safe_pipeline_result(cleaned_transcript, metadata)
     result = normalize_pipeline_result(result, cleaned_transcript, metadata)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
