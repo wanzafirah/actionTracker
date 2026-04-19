@@ -321,7 +321,7 @@ def smart_summary_sentences(text: str, limit: int = 3) -> list[str]:
             score += 1
         if len(sentence) > 220:
             score -= 1
-        if index == 0:
+        if index == 0 and any(keyword in lowered for keyword in ("objective", "purpose", "discuss", "review", "decision", "request", "action", "follow up")):
             score += 1
         if index == len(sentences) - 1:
             score += 1
@@ -370,7 +370,7 @@ def fallback_key_decisions(text: str, limit: int = 3) -> list:
     return decisions
 
 
-def smart_summary_from_transcript(text: str, limit: int = 3) -> str:
+def smart_summary_from_transcript(text: str, limit: int = 5) -> str:
     sentences = smart_summary_sentences(text, limit=limit)
     if sentences:
         return " ".join(sentences).strip()
@@ -410,6 +410,17 @@ def looks_like_copied_intro(candidate: str, transcript: str) -> bool:
     if intro_words and overlap / max(len(set(intro_words)), 1) >= 0.8 and len(candidate_words) <= len(intro_words) + 4:
         return True
 
+    return False
+
+
+def summary_needs_expansion(candidate: str, transcript: str, min_words: int = 45) -> bool:
+    candidate_text = normalize_compare_text(candidate)
+    if not candidate_text:
+        return True
+    if len(candidate_text.split()) < min_words:
+        return True
+    if looks_like_copied_intro(candidate, transcript):
+        return True
     return False
 
 
