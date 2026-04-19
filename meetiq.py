@@ -1272,6 +1272,77 @@ def recover_json_with_ollama(raw: str) -> dict:
     return extract_json(repaired)
 
 
+def refine_summary_fields(result: dict, transcript: str, metadata: dict | None = None) -> dict:
+    metadata = metadata or {}
+    summary_text = normalize_value(result.get("summary"), "")
+    objective_text = normalize_value(result.get("objective"), "")
+    should_refine_summary = summary_needs_expansion(summary_text, transcript)
+    should_refine_objective = not objective_text or looks_like_copied_intro(objective_text, transcript)
+    if not should_refine_summary and not should_refine_objective:
+        return result
+
+    metadata_lines = []
+    for label, value in metadata.items():
+        normalized = normalize_value(value, "")
+        if normalized:
+            metadata_lines.append(f"{label}: {normalized}")
+
+    action_lines = []
+    for action in result.get("action_items", []):
+        if isinstance(action, dict):
+            action_lines.append(
+                " | ".join(
+                    [
+                        normalize_value(action.get("text"), ""),
+                        f"owner={normalize_value(action.get('owner'), 'Not stated')}",
+                        f"department={normalize_value(action.get('department') or action.get('company'), 'Not stated')}",
+                        f"deadline={normalize_value(action.get('deadline'), 'None')}",
+                    ]
+                )
+            )
+
+    refine_system = """You rewrite meeting recaps into stronger business-friendly prose.
+Return ONLY valid JSON with keys: summary, objective.
+
+Rules:
+- summary must be a 5-7 sentence paraphrased meeting summary.
+- objective must be 1-2 sentences describing what the meeting was trying to achieve.
+- Do not copy or repeat the opening recap line verbatim.
+- Read the whole context and explain the meeting in clear, natural business language.
+- Mention the core discussion, decisions, requests, action items, deadlines, and pending follow-up when they are present.
+- Keep names, organizations, projects, and timelines accurate.
+"""
+    refine_prompt = (
+        f"Metadata:\n{chr(10).join(metadata_lines) or 'None'}\n\n"
+        f"Discussion points:\n{join_list(result.get('discussion_points', []), 'None')}\n\n"
+        f"Key decisions:\n{join_list(result.get('key_decisions', []), 'None')}\n\n"
+        f"Action items:\n{chr(10).join(action_lines) or 'None'}\n\n"
+        f"Current summary:\n{summary_text or 'None'}\n\n"
+        f"Current objective:\n{objective_text or 'None'}\n\n"
+        f"Transcript / recap:\n{transcript[:3500]}"
+    )
+    try:
+        refined = extract_json(call_ollama(refine_system, refine_prompt, max_tokens=700))
+    except Exception:
+        refined = {}
+
+    if should_refine_summary:
+        refined_summary = normalize_value(refined.get("summary"), "")
+        if refined_summary and not looks_like_copied_intro(refined_summary, transcript):
+            result["summary"] = refined_summary
+        else:
+            result["summary"] = smart_summary_from_transcript(transcript, limit=5) or summary_text
+
+    if should_refine_objective:
+        refined_objective = normalize_value(refined.get("objective"), "")
+        if refined_objective and not looks_like_copied_intro(refined_objective, transcript):
+            result["objective"] = refined_objective
+        else:
+            result["objective"] = better_objective_from_transcript(transcript) or objective_text or "Objective not clearly extracted."
+
+    return result
+
+
 def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) -> dict:
     metadata = metadata or {}
     discussion_points = fallback_discussion_points(transcript)
@@ -1578,6 +1649,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         result["follow_up"] = True
     else:
         result["follow_up"] = False
+    result = refine_summary_fields(result, cleaned_transcript, metadata)
     return result
 
 
