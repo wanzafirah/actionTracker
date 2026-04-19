@@ -1159,6 +1159,11 @@ Rules:
 - Use metadata such as stakeholders, organizations, departments, and report-by names to resolve who the meeting is about and what follow-up is needed.
 - If the transcript is a long discussion, summarize the full conversation into the main topics, what was agreed, what was requested, and what remains pending.
 - Keep the summary concrete and specific. Mention the actual organizations, speakers, projects, timelines, and requests when they are present.
+- If an action item is clearly stated for any party, capture it. If it belongs to another organization, keep it in action_items with the correct owner and department instead of dropping it.
+- If the meeting says someone will send, circulate, provide, share, confirm, update, prepare, arrange, or coordinate something, treat that as an action item.
+- If a timeline such as a date, month, "early October", or "before the programme begins" is explicitly mentioned near an action, copy it into deadline.
+- suggestion should be a practical next-step idea for how to complete the action item.
+- follow_up should be true whenever there is at least one pending action item, outstanding request, promised deliverable, or deadline.
 - If the recap only describes the purpose of a meeting, expected outcome, or general discussion without a direct task, return an empty action_items list and set follow_up to false unless a pending task is clearly stated.
 
 Return this schema only:
@@ -1465,22 +1470,27 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         else ""
     )
     user_msg = (
-        "Return concise JSON with objective, summary, follow-up, and action items.\n"
-        "Use only explicit tasks from the text. Do not invent implied action items.\n"
+        "Return detailed JSON with summary, objective, outcome, follow-up, action items, deadlines, and solution suggestions.\n"
+        "Use only tasks and deadlines that are explicitly stated in the meeting recap.\n"
+        "Make the summary strong enough that someone who missed the meeting can understand what happened, what was agreed, what is pending, and what should happen next.\n"
+        "For each action item, include owner, department, deadline, and suggestion when available.\n"
         f"{objective_note}"
         f"Activity metadata:\n{metadata_block or 'None provided'}\n\n"
         f"Meeting content:\n{cleaned_transcript}"
     )
-    raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=250)
     try:
-        result = extract_json(raw)
-    except json.JSONDecodeError:
-        result = recover_json_with_ollama(raw)
-    except Exception:
+        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=1200)
         try:
+            result = extract_json(raw)
+        except json.JSONDecodeError:
             result = recover_json_with_ollama(raw)
         except Exception:
-            result = build_safe_pipeline_result(cleaned_transcript, metadata)
+            try:
+                result = recover_json_with_ollama(raw)
+            except Exception:
+                result = build_safe_pipeline_result(cleaned_transcript, metadata)
+    except Exception:
+        result = build_safe_pipeline_result(cleaned_transcript, metadata)
     result = normalize_pipeline_result(result, cleaned_transcript, metadata)
     action_count = len(result.get("action_items", []))
     if not objective_only and action_count > 0:
@@ -1502,7 +1512,8 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         result["key_decisions"] = fallback_key_decisions(cleaned_transcript)
 
     result["follow_up_reason"] = ""
-    filtered_actions = filter_talentcorp_actions(result.get("action_items", []))
+    model_actions = result.get("action_items", []) if isinstance(result.get("action_items"), list) else []
+    filtered_actions = model_actions
     if not filtered_actions and not objective_only:
         filtered_actions = fallback_action_items(cleaned_transcript)
 
@@ -1547,12 +1558,25 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
                 "ner_entities": [],
             }
         )
+    for action in filtered_actions:
+        if isinstance(action, dict):
+            action["deadline"] = normalize_value(action.get("deadline"), "None")
+            action["owner"] = normalize_value(action.get("owner"), "Not stated")
+            department_value = normalize_value(action.get("department") or action.get("company"), "Not stated")
+            action["department"] = department_value
+            action["company"] = department_value
+            action["suggestion"] = normalize_value(
+                action.get("suggestion"),
+                f"Coordinate with {normalize_value(action.get('owner'), 'the assigned owner')} to close this item.",
+            )
     result["action_items"] = filtered_actions
     result.setdefault("classification", {})
     result["classification"]["action_items_count"] = len(filtered_actions)
     result["classification"]["decisions_count"] = len(result.get("key_decisions", []))
     result["classification"]["discussion_points_count"] = len(result.get("discussion_points", []))
-    if not filtered_actions:
+    if filtered_actions:
+        result["follow_up"] = True
+    else:
         result["follow_up"] = False
     return result
 
