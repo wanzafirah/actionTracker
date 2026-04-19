@@ -22,6 +22,8 @@ from meetiq_utils import (
     normalize_status,
     normalize_value,
     is_objective_only_transcript,
+    better_objective_from_transcript,
+    looks_like_copied_intro,
     smart_summary_from_transcript,
     today_str,
     uid,
@@ -681,7 +683,12 @@ Rules:
 
     parsed["title"] = normalize_value(parsed.get("title"), "") or fallback_title_from_text(raw_text)
     parsed["summary"] = normalize_value(parsed.get("summary"), "") or fallback_summary_from_text(raw_text)
+    if looks_like_copied_intro(parsed["summary"], raw_text):
+        parsed["summary"] = fallback_summary_from_text(raw_text)
+
     parsed["objective"] = normalize_value(parsed.get("objective"), "") or "Review the meeting discussion and align on the next steps."
+    if not parsed["objective"] or looks_like_copied_intro(parsed["objective"], raw_text):
+        parsed["objective"] = better_objective_from_transcript(raw_text) or parsed["objective"]
     parsed["outcome"] = normalize_value(parsed.get("outcome"), "") or "Meeting recap captured from the submitted text."
     parsed["key_decisions"] = dedupe_preserve_order(parsed.get("key_decisions", []) or fallback_key_decisions(raw_text))
     parsed["discussion_points"] = dedupe_preserve_order(parsed.get("discussion_points", []) or fallback_discussion_points(raw_text))
