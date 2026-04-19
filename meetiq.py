@@ -58,11 +58,14 @@ from meetiq_utils import (
     json_dumps_safe,
     json_loads_safe,
     load_text_list,
+    better_objective_from_transcript,
+    looks_like_copied_intro,
     normalize_status,
     normalize_value,
     parse_yes_no,
     pretty_deadline,
     render_entity_list,
+    summary_needs_expansion,
     smart_summary_from_transcript,
     today_str,
     uid,
@@ -1262,7 +1265,7 @@ def build_safe_pipeline_result(transcript: str, metadata: dict | None = None) ->
     meeting_type = normalize_value(metadata.get("Activity Type"), "") or "Not Provided"
     category = normalize_value(metadata.get("Category"), "") or "Not Provided"
     objective = discussion_points[0] if discussion_points else "Objective not clearly extracted."
-    summary = smart_summary_from_transcript(transcript, limit=3) or "Summary could not be generated from the transcript."
+    summary = smart_summary_from_transcript(transcript, limit=5) or "Summary could not be generated from the transcript."
     return {
         "title": title,
         "meeting_type": meeting_type,
@@ -1330,6 +1333,12 @@ def normalize_pipeline_result(result: dict, transcript: str, metadata: dict | No
         ]
     if not isinstance(merged.get("people_involved"), list):
         merged["people_involved"] = []
+    summary_text = normalize_value(merged.get("summary"), "")
+    if summary_needs_expansion(summary_text, transcript):
+        merged["summary"] = smart_summary_from_transcript(transcript, limit=5) or summary_text
+    objective_text = normalize_value(merged.get("objective"), "")
+    if not objective_text or looks_like_copied_intro(objective_text, transcript):
+        merged["objective"] = better_objective_from_transcript(transcript) or merged["objective"]
     if isinstance(merged.get("action_items"), list):
         normalized_actions = []
         for action in merged["action_items"]:
@@ -1491,7 +1500,7 @@ def run_pipeline(transcript: str, metadata: dict | None = None) -> dict:
         f"Meeting content:\n{cleaned_transcript}"
     )
     try:
-        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=900)
+        raw = call_ollama(PIPELINE_SYSTEM, user_msg, max_tokens=1400)
         try:
             result = extract_json(raw)
         except Exception:
