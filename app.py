@@ -1,10 +1,10 @@
 import streamlit as st
 
 from core.database import init_state, seed_default_departments, set_current_page, sync_page_from_query
-from pages.capture import render_capture
-from pages.dashboard import render_dashboard
-from pages.history import render_history
-from pages.tracker import render_tracker
+from app_pages.capture import render_capture
+from app_pages.dashboard import render_dashboard
+from app_pages.history import render_history
+from app_pages.tracker import render_tracker
 from ui.sidebar import render_sidebar
 from ui.styles import inject_styles
 from utils.helpers import build_action_dataframe, build_meeting_dataframe
